@@ -22,12 +22,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'passbook-development-only-change-me')
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'passbook-development-only-change-me',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        'ALLOWED_HOSTS',
+        'localhost,127.0.0.1',
+    ).split(',')
+    if host.strip()
+]
 
 
 # Application definition
@@ -63,7 +73,7 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:3000,http://127.0.0.1:3000',
+        'http://localhost:5500,http://127.0.0.1:5500',
     ).split(',')
     if origin.strip()
 ]
@@ -105,8 +115,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+MYSQL_SSL_MODE = os.environ.get('MYSQL_SSL_MODE', 'DISABLED')
 
 DATABASES = {
     'default': {
@@ -116,6 +125,15 @@ DATABASES = {
         'PORT': os.environ.get('MYSQL_PORT', '3308'),
         'USER': os.environ.get('MYSQL_USER', 'root'),
         'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
+        'OPTIONS': (
+            {
+                'ssl': {
+                    'ssl_mode': MYSQL_SSL_MODE,
+                },
+            }
+            if MYSQL_SSL_MODE != 'DISABLED'
+            else {}
+        ),
     }
 }
 

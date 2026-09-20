@@ -28,6 +28,7 @@ button:hover,
 
 .button-primary {
     background: var(--primary-color);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.18);
     color: #fff;
 }
 
@@ -89,7 +90,7 @@ textarea {
     border-radius: var(--border-radius);
     color: var(--text-primary);
     min-height: 2.75rem;
-    padding: 0.625rem 0.75rem;
+    padding: 0.7rem 0.8rem;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
     width: 100%;
 }
@@ -133,7 +134,7 @@ textarea:focus {
 }
 
 .book-card {
-    background: var(--background-color);
+    background: var(--surface-color);
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius-lg);
     box-shadow: var(--shadow-sm);
@@ -159,7 +160,8 @@ textarea:focus {
     position: relative;
     display: grid;
     gap: 0.5rem;
-    padding: 1rem;
+    min-height: 11rem;
+    padding: 1.1rem;
 }
 
 .favorite-button {
@@ -223,6 +225,18 @@ textarea:focus {
     color: var(--primary-color);
     font-size: 1.125rem;
     font-weight: 700;
+}
+
+.book-card__body .caption {
+    margin-bottom: 0;
+}
+
+.book-card__image {
+    transition: transform 220ms ease;
+}
+
+.book-card:hover .book-card__image {
+    transform: scale(1.035);
 }
 
 .badge {
@@ -368,7 +382,8 @@ textarea:focus {
 }
 
 .site-header {
-    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, 0.88);
     border-bottom: 1px solid var(--border-color);
     position: sticky;
     top: 0;
@@ -433,8 +448,12 @@ textarea:focus {
 .nav-links a:hover,
 .nav-links a.is-active,
 .nav-actions a:hover {
-    background: var(--surface-color);
+    background: var(--secondary-color);
     color: var(--primary-color);
+}
+
+.nav-links a.is-active {
+    font-weight: 700;
 }
 
 .nav-actions .button-primary {

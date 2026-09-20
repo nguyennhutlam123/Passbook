@@ -87,3 +87,14 @@ Mở `http://127.0.0.1:3000`.
 Ứng dụng dùng dữ liệu hiện có trong `passbook_db`. Tài khoản test tạm thời được tạo trong quá trình kiểm thử và không được giữ lại trong database.
 
 Ảnh sách hiện được thêm bằng URL vì API backend không hỗ trợ multipart upload.
+
+Để thêm dữ liệu demo phong phú (an toàn khi chạy lặp lại), chạy lệnh sau từ thư mục `backend/`:
+
+```bash
+python manage.py seed_demo_data
+```
+
+Lệnh chỉ tạo các bản ghi còn thiếu (6 trường, 40 người dùng, 30 môn học, 6 danh mục,
+12 địa điểm, 120 sách, 240 ảnh, 120 yêu thích, 36 cuộc trò chuyện, 108 tin nhắn,
+60 thông báo và 12 báo cáo). Lệnh không chạy migrations, không xóa hoặc reset dữ liệu
+hiện có. Tài khoản demo dùng mật khẩu `PassbookDemo123!`; chỉ dùng trong môi trường demo.

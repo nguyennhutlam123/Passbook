@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell auth-page">
+        <section class="auth-card">
+            <span class="eyebrow">Tham gia PassBook</span>
+            <h1>Đăng ký</h1>
+            <form data-register-form novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="register-name">Họ tên</label>
+                    <input id="register-name" name="name" type="text" autocomplete="name">
+                    <span class="form-error" data-error-for="name"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="register-email">Email</label>
+                    <input id="register-email" name="email" type="email" autocomplete="email">
+                    <span class="form-error" data-error-for="email"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="register-university">Trường đại học</label>
+                    <select id="register-university" name="university_id" required>
+                        <option value="">Chọn trường</option>
+                        <option value="1">Đại học Sư phạm Thành phố Hồ Chí Minh</option>
+                        <option value="2">Đại học Kinh tế Thành phố Hồ Chí Minh</option>
+                        <option value="3">Đại học Quốc gia Thành phố Hồ Chí Minh</option>
+                    </select>
+                    <span class="form-error" data-error-for="university_id"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="register-password">Mật khẩu</label>
+                    <input id="register-password" name="password" type="password" autocomplete="new-password">
+                    <span class="form-error" data-error-for="password"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="register-confirm-password">Xác nhận mật khẩu</label>
+                    <input id="register-confirm-password" name="confirmPassword" type="password" autocomplete="new-password">
+                    <span class="form-error" data-error-for="confirmPassword"></span>
+                </div>
+                <button class="button button-primary" type="submit">Đăng ký</button>
+            </form>
+            <p class="auth-switch">Đã có tài khoản? <a href="login.html">Đăng nhập</a></p>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/auth.js"></script>
+</body>
+</html>

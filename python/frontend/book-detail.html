@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chi tiết giáo trình - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell detail-page" data-book-detail>
+        <p class="caption"><a href="books.html">← Quay lại danh sách</a></p>
+        <div class="detail-layout">
+            <section class="detail-gallery" aria-label="Ảnh giáo trình">
+                <img class="detail-gallery__main" data-detail-main-image src="" alt="">
+                <div class="detail-gallery__thumbs" data-detail-thumbs></div>
+            </section>
+            <section class="detail-info">
+                <div data-detail-status></div>
+                <h1 data-detail-title>Đang tải...</h1>
+                <strong class="price detail-price" data-detail-price></strong>
+                <dl class="detail-meta" data-detail-meta></dl>
+                <div class="detail-description">
+                    <h2>Mô tả</h2>
+                    <p data-detail-description></p>
+                </div>
+                <div class="seller-panel" data-detail-seller></div>
+                <div class="detail-location">
+                    <p><strong>Địa điểm giao nhận:</strong> <span data-detail-location></span></p>
+                    <p><strong>Thời gian giao nhận:</strong> Linh hoạt theo lịch học</p>
+                </div>
+                <div class="detail-actions" data-detail-actions></div>
+            </section>
+        </div>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/book-detail.js"></script>
+</body>
+</html>

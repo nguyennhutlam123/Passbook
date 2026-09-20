@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trang cá nhân - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell profile-page" data-profile-page>
+        <section class="profile-header">
+            <span class="profile-avatar avatar">NL</span>
+            <div>
+                <h1 data-profile-name>Nguyễn Lâm <span class="verified">✓</span></h1>
+                <p data-profile-school>HCMUE</p>
+                <p class="caption">MSSV: <span data-profile-student-id>********</span></p>
+            </div>
+        </section>
+        <section class="profile-listings">
+            <div class="section-heading"><div><span class="eyebrow">Trao đổi</span><h2>Cuộc hội thoại</h2></div></div>
+            <div class="conversation-list" data-conversation-list><p class="caption">Đang tải...</p></div>
+        </section>
+        <section class="profile-listings">
+            <div class="section-heading"><div><span class="eyebrow">An toàn</span><h2>Báo cáo của tôi</h2></div></div>
+            <div class="report-list" data-report-list><p class="caption">Đang tải...</p></div>
+        </section>
+        <section class="profile-listings">
+            <div class="section-heading">
+                <div><span class="eyebrow">Quản lý</span><h2>Tin đăng của tôi</h2></div>
+            </div>
+            <div class="profile-tabs" role="tablist">
+                <button class="button is-active" type="button" data-profile-tab="available" aria-selected="true">Tin đang bán</button>
+                <button class="button button-outline" type="button" data-profile-tab="sold" aria-selected="false">Đã bán</button>
+                <button class="button button-outline" type="button" data-profile-tab="saved" aria-selected="false">Đã lưu</button>
+            </div>
+            <div class="book-grid profile-grid" data-profile-grid></div>
+            <div class="empty-state" data-profile-empty hidden><strong>Chưa có tin đăng</strong><a class="button button-primary" href="sell.html">Đăng bán giáo trình</a></div>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/profile.js"></script>
+</body>
+</html>

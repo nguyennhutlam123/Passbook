@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng bán - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell sell-page">
+        <div class="page-intro">
+            <span class="eyebrow">Góc người bán</span>
+            <h1>Đăng bán giáo trình</h1>
+            <p class="text-secondary">Chia sẻ giáo trình bạn không còn sử dụng với sinh viên cùng trường.</p>
+        </div>
+        <form class="sell-form" data-sell-form novalidate>
+            <div class="sell-form__grid">
+                <div class="form-group form-group--wide">
+                    <label class="form-label" for="book-title">Tên giáo trình *</label>
+                    <input id="book-title" name="title" type="text">
+                    <span class="form-error" data-error-for="title"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-subject">Môn học *</label>
+                    <select id="book-subject" name="subject_id">
+                        <option value="">Chọn môn học</option>
+                        <option value="1">Cơ học</option>
+                        <option value="2">Điện học</option>
+                        <option value="3">Đại số</option>
+                    </select>
+                    <span class="form-error" data-error-for="subject_id"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-code">Danh mục</label>
+                    <select id="book-code" name="category_id">
+                        <option value="">Chọn danh mục</option>
+                        <option value="1">Giáo trình</option>
+                        <option value="3">Sách tham khảo</option>
+                        <option value="4">Dụng cụ học tập</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-price">Giá *</label>
+                    <input id="book-price" name="price" type="number" min="1" step="1000">
+                    <span class="form-error" data-error-for="price"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-condition">Tình trạng *</label>
+                    <select id="book-condition" name="condition">
+                        <option value="">Chọn tình trạng</option>
+                        <option value="new">Mới</option><option value="like_new">Như mới</option><option value="good">Tốt</option><option value="used">Đã sử dụng</option>
+                    </select>
+                    <span class="form-error" data-error-for="condition"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-edition">Phiên bản</label>
+                    <input id="book-edition" name="edition" type="text">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-year">Năm xuất bản</label>
+                    <input id="book-year" name="publication_year" type="number" min="1900" max="2100">
+                </div>
+                <div class="form-group form-group--wide">
+                    <label class="form-label" for="book-description">Mô tả *</label>
+                    <textarea id="book-description" name="description"></textarea>
+                    <span class="form-error" data-error-for="description"></span>
+                </div>
+                <div class="form-group form-group--wide">
+                    <label class="form-label" for="book-image-url">URL ảnh *</label>
+                    <input id="book-image-url" name="image_url" type="url" placeholder="https://example.com/book-cover.jpg">
+                    <span class="caption">Ảnh hiện được thêm bằng URL; chưa hỗ trợ tải file trực tiếp.</span>
+                    <span class="form-error" data-error-for="images"></span>
+                    <div class="upload-previews" data-upload-previews></div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-location">Địa điểm giao nhận</label>
+                    <select id="book-location" name="pickup_location_id">
+                        <option value="">Chọn địa điểm</option>
+                        <option value="1">Thư viện</option>
+                        <option value="2">Căn tin</option>
+                        <option value="3">Sảnh khoa Vật lý</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-meeting-time">Thời gian giao nhận</label>
+                    <input id="book-meeting-time" name="pickup_note" type="text" placeholder="Ví dụ: Sau giờ học">
+                </div>
+            </div>
+            <button class="button button-primary" type="submit">Đăng tin</button>
+        </form>
+        <section class="success-panel" data-sell-success hidden>
+            <span class="success-panel__icon" aria-hidden="true">✓</span>
+            <h2>Đăng tin thành công!</h2>
+            <p>Giáo trình của bạn đã được tạo.</p>
+            <div>
+                <a class="button button-primary" href="profile.html">Xem tin đăng</a>
+                <button class="button button-outline" type="button" data-new-listing>Tiếp tục đăng bán</button>
+            </div>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/sell.js"></script>
+</body>
+</html>

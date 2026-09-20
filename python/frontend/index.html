@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main>
+        <section class="hero">
+            <div class="page-shell hero__content">
+                <span class="eyebrow">Cùng trường · Cùng môn · Dễ tìm</span>
+                <h1>Tìm giáo trình cho học kỳ mới</h1>
+                <p>Mua lại giáo trình từ sinh viên cùng trường với mức giá phù hợp và dễ dàng giao nhận.</p>
+                <form class="search-box hero__search" data-home-search>
+                    <label class="sr-only" for="home-search">Tên giáo trình hoặc môn học</label>
+                    <input id="home-search" name="q" type="search" placeholder="Tên giáo trình hoặc môn học" autocomplete="off">
+                    <button class="button button-primary" type="submit">🔍 Tìm giáo trình</button>
+                </form>
+            </div>
+        </section>
+
+        <section class="page-shell home-section" aria-labelledby="categories-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Khám phá nhanh</span>
+                    <h2 id="categories-title">Tìm theo danh mục</h2>
+                </div>
+            </div>
+            <div class="category-list">
+                <a class="category-chip is-active" href="books.html">Tất cả</a>
+                <a class="category-chip" href="books.html?subject=Khoa%20học%20tự%20nhiên">Khoa học tự nhiên</a>
+                <a class="category-chip" href="books.html?subject=Khoa%20học%20xã%20hội">Khoa học xã hội</a>
+                <a class="category-chip" href="books.html?subject=Ngoại%20ngữ">Ngoại ngữ</a>
+                <a class="category-chip" href="books.html?subject=Công%20nghệ%20thông%20tin">Công nghệ thông tin</a>
+                <a class="category-chip" href="books.html?subject=Vật%20lý">Vật lý</a>
+                <a class="category-chip" href="books.html?subject=Hóa%20học">Hóa học</a>
+                <a class="category-chip" href="books.html?subject=Toán">Toán</a>
+            </div>
+        </section>
+
+        <section class="page-shell home-section" aria-labelledby="new-books-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Mới nhất</span>
+                    <h2 id="new-books-title">Giáo trình mới đăng</h2>
+                </div>
+                <a class="button button-outline" href="books.html">Xem tất cả</a>
+            </div>
+            <div class="book-grid" data-featured-books></div>
+        </section>
+
+        <section class="page-shell home-section" aria-labelledby="benefits-title">
+            <div class="section-heading">
+                <div>
+                    <span class="eyebrow">Tại sao PassBook?</span>
+                    <h2 id="benefits-title">Mua bán đơn giản hơn</h2>
+                </div>
+            </div>
+            <div class="benefit-grid">
+                <article class="benefit-card"><span class="benefit-icon" aria-hidden="true">🔎</span><h3>Dễ tìm</h3><p>Tìm giáo trình theo môn học và trường.</p></article>
+                <article class="benefit-card"><span class="benefit-icon" aria-hidden="true">💰</span><h3>Tiết kiệm</h3><p>Mua sách đã qua sử dụng với giá phù hợp.</p></article>
+                <article class="benefit-card"><span class="benefit-icon" aria-hidden="true">🎓</span><h3>Cùng trường</h3><p>Kết nối sinh viên trong cùng trường.</p></article>
+                <article class="benefit-card"><span class="benefit-icon" aria-hidden="true">📍</span><h3>Dễ giao nhận</h3><p>Hẹn giao trực tiếp tại trường.</p></article>
+            </div>
+        </section>
+
+        <section class="page-shell seller-cta" aria-labelledby="seller-cta-title">
+            <div>
+                <span class="eyebrow">Góc người bán</span>
+                <h2 id="seller-cta-title">Bạn có giáo trình không còn sử dụng?</h2>
+                <p>Đừng để sách nằm trên kệ.</p>
+            </div>
+            <a class="button button-primary" href="sell.html">Đăng bán giáo trình</a>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/api.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

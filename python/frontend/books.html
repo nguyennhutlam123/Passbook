@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tìm giáo trình - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell catalog-page">
+        <div class="catalog-search">
+            <label class="sr-only" for="catalog-query">Tìm giáo trình</label>
+            <input id="catalog-query" type="search" placeholder="Tên giáo trình, môn học hoặc mã môn">
+            <button class="button button-primary" type="button" data-search-submit>🔍 Tìm kiếm</button>
+        </div>
+        <div class="catalog-layout">
+            <aside class="filter-panel" aria-label="Bộ lọc giáo trình">
+                <div class="filter-heading">
+                    <h1>Tìm giáo trình</h1>
+                    <button class="button button-outline filter-close" type="button" data-filter-close>Đóng</button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-school">Trường</label>
+                    <select id="filter-school">
+                        <option value="">Tất cả trường</option>
+                        <option value="1">Đại học Sư phạm Thành phố Hồ Chí Minh</option>
+                        <option value="2">Đại học Kinh tế Thành phố Hồ Chí Minh</option>
+                        <option value="3">Đại học Quốc gia Thành phố Hồ Chí Minh</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-subject">Môn học</label>
+                    <select id="filter-subject">
+                        <option value="">Tất cả môn học</option>
+                        <option value="1">Cơ học</option>
+                        <option value="2">Điện học</option>
+                        <option value="3">Đại số</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-category">Danh mục</label>
+                    <select id="filter-category">
+                        <option value="">Tất cả danh mục</option>
+                        <option value="1">Giáo trình</option>
+                        <option value="3">Sách tham khảo</option>
+                        <option value="4">Dụng cụ học tập</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-location">Địa điểm</label>
+                    <select id="filter-location">
+                        <option value="">Tất cả địa điểm</option>
+                        <option value="1">Thư viện</option>
+                        <option value="2">Căn tin</option>
+                        <option value="3">Sảnh khoa Vật lý</option>
+                    </select>
+                </div>
+                <fieldset class="filter-fieldset">
+                    <legend class="form-label">Tình trạng</legend>
+                    <label><input type="radio" name="condition" value="new"> Mới</label>
+                    <label><input type="radio" name="condition" value="like_new"> Như mới</label>
+                    <label><input type="radio" name="condition" value="good"> Tốt</label>
+                    <label><input type="radio" name="condition" value="used"> Đã sử dụng</label>
+                </fieldset>
+                <div class="form-group">
+                    <label class="form-label" for="filter-min-price">Giá tối thiểu</label>
+                    <input id="filter-min-price" type="number" min="0" step="1000" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-price">Giá tối đa</label>
+                    <input id="filter-price" type="range" min="0" max="1000000" step="10000" value="1000000">
+                    <output id="price-output" for="filter-price">1.000.000đ</output>
+                </div>
+                <button class="button button-outline" type="button" data-reset-filters>Xóa bộ lọc</button>
+            </aside>
+            <section class="catalog-results" aria-live="polite">
+                <div class="results-toolbar">
+                    <div>
+                        <button class="button button-outline filter-open" type="button" data-filter-open>Bộ lọc</button>
+                        <p class="caption" data-result-count>Đang tải giáo trình...</p>
+                    </div>
+                    <label class="sort-control">Sắp xếp
+                        <select id="sort-books">
+                            <option value="newest">Mới nhất</option>
+                            <option value="oldest">Cũ nhất</option>
+                            <option value="price-asc">Giá thấp → cao</option>
+                            <option value="price-desc">Giá cao → thấp</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="book-grid" data-catalog-grid></div>
+                <div class="empty-state" data-catalog-empty hidden>
+                    <span aria-hidden="true">🔍</span>
+                    <strong>Không tìm thấy tài liệu phù hợp.</strong>
+                    <p>Thử:</p>
+                    <ul class="empty-state__tips">
+                        <li>Kiểm tra lại tên sách</li>
+                        <li>Tìm bằng tên môn học</li>
+                        <li>Bỏ bớt bộ lọc</li>
+                    </ul>
+                    <button class="button button-outline" type="button" data-reset-empty>Xóa bộ lọc</button>
+                </div>
+                <nav class="pagination" data-pagination aria-label="Phân trang"></nav>
+            </section>
+        </div>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/books.js"></script>
+</body>
+</html>

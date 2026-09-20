@@ -1,7 +1,8 @@
 document.addEventListener("DOMContentLoaded", () => {
     const form = document.querySelector("[data-sell-form]");
     if (!form) return;
-    const imageUrlInput = form.querySelector("#book-image-url");
+    const imageFileInput = form.querySelector("#book-image-file");
+    const submitButton = form.querySelector("button[type='submit']");
     const previews = form.querySelector("[data-upload-previews]");
     const success = document.querySelector("[data-sell-success]");
     const editing = JSON.parse(localStorage.getItem("editingListing") || "null");
@@ -31,10 +32,19 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    imageUrlInput?.addEventListener("input", () => {
+    const validateImageFile = (file) => {
+        if (!file) return "Vui lòng chọn ảnh.";
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+        if (!allowedTypes.includes(file.type)) return "Chỉ chấp nhận ảnh JPG, PNG, WebP hoặc GIF.";
+        if (file.size > 10 * 1024 * 1024) return "Ảnh không được vượt quá 10 MB.";
+        return "";
+    };
+
+    imageFileInput?.addEventListener("change", () => {
         setError("images");
-        previews.innerHTML = imageUrlInput.value.trim()
-            ? `<img src="${imageUrlInput.value.trim()}" alt="Ảnh xem trước">`
+        const file = imageFileInput.files[0];
+        previews.innerHTML = file
+            ? `<img src="${URL.createObjectURL(file)}" alt="Ảnh xem trước">`
             : "";
     });
 
@@ -48,10 +58,16 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!Number(data.get("price")) || Number(data.get("price")) <= 0) errors.price = "Giá phải lớn hơn 0.";
         if (!data.get("condition")) errors.condition = "Vui lòng chọn tình trạng.";
         if (!data.get("description")?.toString().trim()) errors.description = "Mô tả không được để trống.";
-        if (!editing && !imageUrlInput?.value.trim()) errors.images = "Vui lòng nhập URL ảnh.";
+        const imageFile = imageFileInput?.files[0];
+        if (!editing) {
+            const imageError = validateImageFile(imageFile);
+            if (imageError) errors.images = imageError;
+        }
         Object.entries(errors).forEach(([field, message]) => setError(field, message));
         if (Object.keys(errors).length) return;
 
+        submitButton.disabled = true;
+        submitButton.textContent = "Đang đăng...";
         const payload = {
             title: data.get("title").toString().trim(),
             description: data.get("description").toString().trim(),
@@ -65,12 +81,36 @@ document.addEventListener("DOMContentLoaded", () => {
             pickup_note: data.get("pickup_note") || "",
         };
         try {
+            let secureUrl = null;
+            if (imageFile) {
+                submitButton.textContent = "Đang tải ảnh...";
+                const signatureData = await api.get("/uploads/cloudinary/signature/");
+                const uploadData = new FormData();
+                uploadData.append("file", imageFile);
+                uploadData.append("api_key", signatureData.api_key);
+                uploadData.append("timestamp", signatureData.timestamp);
+                uploadData.append("folder", signatureData.folder);
+                uploadData.append("signature", signatureData.signature);
+                const uploadResponse = await fetch(
+                    `https://api.cloudinary.com/v1_1/${encodeURIComponent(signatureData.cloud_name)}/image/upload`,
+                    {method: "POST", body: uploadData},
+                );
+                const uploadedImage = await uploadResponse.json();
+                if (!uploadResponse.ok || !uploadedImage.secure_url) {
+                    throw new Error(uploadedImage.error?.message || "Không thể tải ảnh lên Cloudinary.");
+                }
+                if (!/^https:\/\//i.test(uploadedImage.secure_url)) {
+                    throw new Error("Cloudinary không trả về secure URL hợp lệ.");
+                }
+                secureUrl = uploadedImage.secure_url;
+            }
+            submitButton.textContent = editing ? "Đang cập nhật..." : "Đang đăng...";
             const book = editing
                 ? await api.patch(`/books/${editing.id}/`, payload)
                 : await api.post("/books/", payload);
-            if (imageUrlInput?.value.trim()) {
+            if (secureUrl) {
                 await api.post(`/books/${book.id}/images/`, {
-                    image_url: imageUrlInput.value.trim(),
+                    image_url: secureUrl,
                     is_primary: true,
                     sort_order: 0,
                 });
@@ -81,6 +121,9 @@ document.addEventListener("DOMContentLoaded", () => {
             showToast(editing ? "Đã cập nhật tin đăng." : "Đăng tin thành công.");
         } catch (error) {
             showToast(error.message);
+        } finally {
+            submitButton.disabled = false;
+            submitButton.textContent = "Đăng tin";
         }
     });
 });

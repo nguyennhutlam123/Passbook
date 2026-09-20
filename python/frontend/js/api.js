@@ -1,5 +1,5 @@
-const API_BASE_URL = window.PASSBOOK_API_URL
-    || "https://passbook-backend-6o0s.onrender.com/api";
+const productionApiUrl = "https://passbook-backend-6o0s.onrender.com/api";
+const API_BASE_URL = window.PASSBOOK_API_URL || productionApiUrl;
 
 function getAccessToken() {
     return localStorage.getItem("accessToken");

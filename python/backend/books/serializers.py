@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from urllib.parse import urlparse
 
 from .models import Book, BookImage, Category, Favorite, Location
 from users.models import Subject
@@ -29,7 +30,7 @@ class BookLocationSerializer(serializers.ModelSerializer):
 
 
 class BookImageSerializer(serializers.ModelSerializer):
-    image_url = serializers.CharField(max_length=255, allow_blank=False, trim_whitespace=True)
+    image_url = serializers.CharField(max_length=500, allow_blank=False, trim_whitespace=True)
     sort_order = serializers.IntegerField(min_value=0, required=False, default=0)
     is_primary = serializers.BooleanField(required=False, default=False)
 
@@ -42,6 +43,11 @@ class BookImageSerializer(serializers.ModelSerializer):
         value = value.strip()
         if not value:
             raise serializers.ValidationError('image_url không được để trống.')
+        parsed = urlparse(value)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            raise serializers.ValidationError('image_url phải là URL HTTP/HTTPS hợp lệ.')
+        if parsed.scheme != 'https':
+            raise serializers.ValidationError('image_url phải sử dụng HTTPS.')
         return value
 
 

@@ -73,10 +73,11 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:5500,http://127.0.0.1:5500',
+        'http://localhost:5500,http://127.0.0.1:5500,https://passbook-frontend.onrender.com',
     ).split(',')
     if origin.strip()
 ]
+
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [

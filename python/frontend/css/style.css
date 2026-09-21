@@ -875,3 +875,255 @@ a:hover {
 .seller-cta--storefront { background: #243c45; border: 0; border-radius: .15rem; color: #fff; margin-bottom: 5rem; margin-top: 0; min-height: 17rem; overflow: hidden; padding: 3.5rem 4rem; position: relative; } .seller-cta--storefront::after { border: 1px solid rgba(244,209,169,.32); border-radius: 50%; content: ""; height: 25rem; position: absolute; right: -3rem; top: -7rem; width: 25rem; }
 .seller-cta--storefront .eyebrow,.seller-cta--storefront h2 { color: #fff; } .seller-cta--storefront h2 { font-size: clamp(1.8rem,4vw,3rem); margin: .5rem 0; } .seller-cta--storefront p { color: #c8d4d2; }
 .button-light { background: #f4d1a9; color: #243c45; margin-left: auto; position: relative; z-index: 1; } .button-light:hover { background: #fff; color: #243c45; }
+
+/* These overrides follow the storefront rules so mobile breakpoints win. */
+@media (max-width: 768px) {
+    html,
+    body {
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .page-shell {
+        max-width: 100%;
+        width: min(100% - 1.25rem, var(--content-width));
+    }
+
+    .navbar {
+        gap: 0.75rem;
+        width: min(100% - 1.25rem, var(--content-width));
+    }
+
+    .books-page .nav-menu {
+        display: none;
+        flex-basis: 100%;
+        width: 100%;
+    }
+
+    .books-page .nav-menu.is-open {
+        display: grid;
+    }
+
+    .nav-search {
+        max-width: none;
+        width: 100%;
+    }
+
+    .storefront-hero__inner {
+        display: block;
+        min-height: 0;
+        padding-bottom: 2.5rem;
+        padding-top: 3rem;
+    }
+
+    .storefront-hero__copy h1 {
+        font-size: clamp(2.35rem, 12vw, 4.2rem);
+    }
+
+    .storefront-search {
+        align-items: stretch;
+        flex-wrap: wrap;
+        max-width: 100%;
+        padding: 0.55rem;
+    }
+
+    .storefront-search input {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .storefront-search .button {
+        flex-basis: 100%;
+        width: 100%;
+    }
+
+    .storefront-hero__art {
+        height: 18rem;
+        margin: 2rem auto 0;
+        max-width: 24rem;
+    }
+
+    .storefront-hero__art::before {
+        height: 18rem;
+        right: 0;
+        width: 18rem;
+    }
+
+    .collection-heading,
+    .section-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .book-grid--storefront {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .seller-cta--storefront {
+        margin-left: 0;
+        margin-right: 0;
+        padding: 2.5rem 1.5rem;
+    }
+
+    .detail-info,
+    .detail-gallery {
+        min-width: 0;
+    }
+
+    .detail-actions .button,
+    .modal-actions .button {
+        flex: 1 1 10rem;
+    }
+
+    .profile-header {
+        align-items: flex-start;
+    }
+
+    .profile-tabs {
+        flex-wrap: wrap;
+    }
+
+    .profile-tabs .button {
+        flex: 1 1 8rem;
+    }
+
+    .site-footer .page-shell {
+        min-height: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .page-shell {
+        padding-bottom: 2.5rem;
+        padding-top: 2.5rem;
+    }
+
+    .book-grid--storefront,
+    .book-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .book-card__body {
+        min-height: 0;
+    }
+
+    .storefront-hero__copy h1 {
+        font-size: clamp(2.2rem, 13vw, 3.3rem);
+    }
+
+    .storefront-hero__meta {
+        gap: 0.7rem 1rem;
+    }
+
+    .book-stack--one {
+        right: 0.5rem;
+        width: 7rem;
+    }
+
+    .book-stack--two {
+        right: 3.8rem;
+        width: 7.5rem;
+    }
+
+    .book-stack--main {
+        left: 0.5rem;
+        width: 8.5rem;
+    }
+
+    .hero-sticker {
+        right: -0.25rem;
+    }
+
+    .detail-meta {
+        grid-template-columns: 1fr;
+    }
+
+    .detail-gallery__thumbs {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    .auth-card {
+        padding: 1.25rem;
+    }
+
+    .success-panel .button {
+        margin-left: 0;
+        margin-right: 0;
+        width: 100%;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1100px) {
+    .navbar {
+        gap: 0.5rem;
+    }
+
+    .nav-menu {
+        gap: 0.5rem;
+    }
+
+    .nav-search {
+        flex-basis: 11rem;
+        min-width: 9rem;
+    }
+
+    .nav-links a,
+    .nav-actions a,
+    .nav-actions button {
+        padding-left: 0.45rem;
+        padding-right: 0.45rem;
+    }
+}
+
+@media (max-width: 900px) {
+    .navbar {
+        flex-wrap: wrap;
+        min-height: 4rem;
+        padding-bottom: 0.75rem;
+        padding-top: 0.75rem;
+    }
+
+    .nav-toggle {
+        background: transparent;
+        border-color: var(--border-color);
+        display: inline-flex !important;
+        font-size: 1.25rem;
+        min-height: 2.5rem;
+        padding: 0.375rem 0.625rem;
+    }
+
+    .nav-menu,
+    .books-page .nav-menu {
+        display: none !important;
+        flex-basis: 100%;
+        padding-top: 0.75rem;
+        width: 100%;
+    }
+
+    .nav-menu.is-open,
+    .books-page .nav-menu.is-open {
+        display: grid !important;
+        gap: 0.5rem;
+    }
+
+    .nav-links,
+    .nav-actions {
+        align-items: stretch;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .nav-links a,
+    .nav-actions a,
+    .nav-actions button,
+    .nav-user {
+        width: 100%;
+    }
+
+    .nav-search {
+        max-width: none;
+        width: 100%;
+    }
+}

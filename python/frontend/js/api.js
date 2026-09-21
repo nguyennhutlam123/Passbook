@@ -12,6 +12,18 @@ function clearAuth() {
     localStorage.removeItem("isLoggedIn");
 }
 
+function formatApiError(payload) {
+    if (!payload || typeof payload !== "object") return "";
+    if (typeof payload.detail === "string") return payload.detail;
+    return Object.entries(payload)
+        .map(([field, value]) => {
+            const message = Array.isArray(value) ? value.join(" ") : String(value);
+            return `${field}: ${message}`;
+        })
+        .filter(Boolean)
+        .join(" ");
+}
+
 async function apiRequest(path, options = {}) {
     const headers = new Headers(options.headers || {});
     if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
@@ -28,7 +40,7 @@ async function apiRequest(path, options = {}) {
         }
     }
     if (!response.ok) {
-        const error = new Error(payload?.detail || "Có lỗi xảy ra khi gọi API.");
+        const error = new Error(formatApiError(payload) || "Có lỗi xảy ra khi gọi API.");
         error.status = response.status;
         error.payload = payload;
         throw error;

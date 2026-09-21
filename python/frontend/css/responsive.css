@@ -51,6 +51,17 @@
         gap: 0.5rem;
     }
 
+    .books-page .nav-search,
+    .books-page .nav-links,
+    .books-page .nav-actions {
+        order: initial;
+    }
+
+    .books-page .nav-search {
+        margin-left: 0;
+        max-width: none;
+    }
+
     .nav-links,
     .nav-actions {
         align-items: stretch;
@@ -79,5 +90,110 @@
 
     .upload-previews {
         grid-template-columns: repeat(3, 1fr);
+    }
+
+    .storefront-hero__inner {
+        display: block;
+        min-height: 0;
+        padding-bottom: 2.5rem;
+        padding-top: 3rem;
+    }
+
+    .storefront-hero__copy h1 {
+        font-size: clamp(2.8rem, 14vw, 4.2rem);
+    }
+
+    .storefront-search {
+        align-items: stretch;
+        flex-wrap: wrap;
+        padding: .55rem;
+    }
+
+    .storefront-search > span {
+        align-self: center;
+    }
+
+    .storefront-search input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .storefront-search .button {
+        flex-basis: 100%;
+        width: 100%;
+    }
+
+    .storefront-hero__art {
+        height: 18rem;
+        margin: 2rem auto 0;
+        max-width: 24rem;
+    }
+
+    .storefront-hero__art::before {
+        height: 18rem;
+        right: 0;
+        width: 18rem;
+    }
+
+    .book-stack--one {
+        height: 11rem;
+        right: 1rem;
+        width: 8rem;
+    }
+
+    .book-stack--two {
+        height: 12rem;
+        right: 5.3rem;
+        top: 2rem;
+        width: 8.5rem;
+    }
+
+    .book-stack--main {
+        height: 14rem;
+        left: 1.5rem;
+        top: 3rem;
+        width: 10rem;
+    }
+
+    .book-stack--main span {
+        font-size: 1.6rem;
+        padding-bottom: 2rem;
+    }
+
+    .hero-sticker {
+        height: 4.3rem;
+        right: 0;
+        top: 10rem;
+        width: 4.3rem;
+    }
+
+    .collection-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: .8rem;
+    }
+
+    .collection-section,
+    .catalog-navigation {
+        padding-bottom: 3rem;
+        padding-top: 2.8rem;
+    }
+
+    .how-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .how-grid strong {
+        margin-top: 1rem;
+    }
+
+    .seller-cta--storefront {
+        align-items: flex-start;
+        margin-bottom: 3rem;
+        padding: 2.5rem 1.5rem;
+    }
+
+    .seller-cta--storefront .button-light {
+        margin: 1rem 0 0;
     }
 }

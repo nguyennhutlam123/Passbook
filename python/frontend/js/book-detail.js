@@ -2,12 +2,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     const container = document.querySelector("[data-book-detail]");
     if (!container) return;
     const id = new URLSearchParams(location.search).get("id");
+    if (!id) {
+        container.innerHTML = '<div class="empty-state"><strong>Không tìm thấy mã giáo trình.</strong><a class="button button-primary" href="books.html">Về danh sách</a></div>';
+        return;
+    }
     try {
         const [book] = await Promise.all([api.get(`/books/${id}/`), loadFavoriteBookIds()]);
         const images = book.images || [];
         const mainImage = container.querySelector("[data-detail-main-image]");
         mainImage.src = safeImageUrl((images.find((item) => item.is_primary) || images[0])?.image_url);
         mainImage.alt = `Ảnh ${book.title}`;
+        mainImage.addEventListener("error", () => {
+            mainImage.src = `https://placehold.co/640x860/f0e5d7/263b4a?text=${encodeURIComponent(book.subject?.name || "PASSBOOK")}`;
+        }, {once: true});
         container.querySelector("[data-detail-thumbs]").innerHTML = images.map((image, index) => `<button class="gallery-thumb ${index === 0 ? "is-active" : ""}" type="button" data-image="${safeImageUrl(image.image_url)}"><img src="${safeImageUrl(image.image_url)}" alt="Ảnh ${index + 1}"></button>`).join("");
         container.querySelectorAll("[data-image]").forEach((thumb) => thumb.addEventListener("click", () => { mainImage.src = thumb.dataset.image; }));
         container.querySelector("[data-detail-status]").innerHTML = `<span class="badge badge-success">${book.condition_label || book.condition_status}</span>`;

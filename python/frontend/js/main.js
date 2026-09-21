@@ -16,6 +16,13 @@ function safeImageUrl(url) {
         : "https://placehold.co/640x480/e2e8f0/475569?text=PASSBOOK";
 }
 
+function attachImageFallbacks(root = document) {
+    root.querySelectorAll(".book-card__image[data-fallback]").forEach((image) => image.addEventListener("error", () => {
+        image.src = image.dataset.fallback;
+        image.removeAttribute("data-fallback");
+    }, {once: true}));
+}
+
 let favoriteBookIds = new Set();
 let favoriteBookIdsPromise = null;
 
@@ -162,38 +169,44 @@ function setupNotifications() {
     });
 }
 
-function renderBookCard(book) {
-    if (book.seller && Array.isArray(book.images)) {
-        const image = book.images?.find((item) => item.is_primary) || book.images?.[0];
-        const isFavorite = isFavoriteBook(book.id);
-        const statusLabel = {sold: "Đã bán", reserved: "Đã giữ", hidden: "Đã ẩn", deleted: "Đã xóa"}[book.status];
-        const badge = statusLabel
-            ? `<span class="badge badge-danger">${statusLabel}</span>`
-            : `<span class="badge badge-success">${book.condition_label || book.condition_status}</span>`;
-        return `<article class="book-card"><a href="book-detail.html?id=${book.id}"><img class="book-card__image" src="${safeImageUrl(image?.image_url)}" alt="${book.title}" loading="lazy"></a><div class="book-card__body"><button class="favorite-button ${isFavorite ? "is-favorite" : ""}" type="button" data-favorite="${book.id}" aria-label="${isFavorite ? "Bỏ lưu" : "Lưu"} ${book.title}" aria-pressed="${isFavorite}">${isFavorite ? "♥" : "♡"}</button>${badge}<h3 class="book-card__title"><a href="book-detail.html?id=${book.id}">${book.title}</a></h3><p class="caption">${book.subject?.name || ""}</p><strong class="price">${formatPrice(Number(book.price))}</strong><div class="seller-line">${book.seller?.name || "Người bán"}</div></div></article>`;
-    }
-    const favorites = JSON.parse(localStorage.getItem("favoriteBookIds") || "[]");
-    const isFavorite = favorites.includes(book.id);
-    const status = book.status === "sold"
-        ? '<span class="badge badge-danger">Đã bán</span>'
-        : `<span class="badge ${book.condition === "Như mới" ? "badge-success" : "badge-warning"}">${book.condition}</span>`;
-    const verified = book.seller.verified ? '<span class="verified" title="Người bán đã xác minh">✓</span>' : "";
+function fallbackBookImage(book) {
+    const subject = book.subject?.name || book.subject || "PASSBOOK";
+    const encoded = encodeURIComponent(subject.slice(0, 24));
+    return `https://placehold.co/640x860/f0e5d7/263b4a?text=${encoded}`;
+}
 
-    return `
-        <article class="book-card">
-            <a href="book-detail.html?id=${book.id}" aria-label="Xem ${book.title}">
-                <img class="book-card__image" src="${book.images[0]}" alt="Ảnh bìa ${book.title}" loading="lazy">
-            </a>
-            <div class="book-card__body">
-                <button class="favorite-button ${isFavorite ? "is-favorite" : ""}" type="button" data-favorite="${book.id}" aria-label="${isFavorite ? "Bỏ lưu" : "Lưu"} ${book.title}" aria-pressed="${isFavorite}">${isFavorite ? "♥" : "♡"}</button>
-                ${status}
-                <h3 class="book-card__title"><a href="book-detail.html?id=${book.id}">${book.title}</a></h3>
-                <p class="caption">${book.subject} · ${book.subjectCode}</p>
-                <p class="caption">${book.school}</p>
-                <strong class="price">${formatPrice(book.price)}</strong>
-                <div class="seller-line"><span class="avatar" aria-hidden="true">${book.seller.name.slice(4, 6)}</span><span>${book.seller.name} ${verified}</span></div>
+function renderBookCard(book) {
+    const image = Array.isArray(book.images)
+        ? (book.images.find((item) => item.is_primary) || book.images[0])
+        : null;
+    const title = escapeHtml(book.title || "Giáo trình");
+    const subject = escapeHtml(book.subject?.name || book.subject || "Giáo trình");
+    const code = escapeHtml(book.subject?.code || book.subjectCode || "");
+    const seller = escapeHtml(book.seller?.name || "Người bán");
+    const location = escapeHtml(book.pickup_location?.name || "");
+    const condition = escapeHtml(book.condition_label || book.condition_status || book.condition || "Đang cập nhật");
+    const statusLabel = {sold: "Đã bán", reserved: "Đã giữ", hidden: "Đã ẩn", deleted: "Đã xóa"}[book.status];
+    const badge = statusLabel
+        ? `<span class="badge badge-danger">${statusLabel}</span>`
+        : `<span class="badge badge-success">${condition}</span>`;
+    const rawImageUrl = image?.image_url || (Array.isArray(book.images) ? book.images[0]?.image_url : "");
+    const imageUrl = rawImageUrl ? safeImageUrl(rawImageUrl) : fallbackBookImage(book);
+    const isFavorite = isFavoriteBook(book.id);
+    return `<article class="book-card">
+        <a class="book-card__cover-link" href="book-detail.html?id=${encodeURIComponent(book.id)}" aria-label="Xem ${title}">
+            <div class="book-card__cover">
+                <img class="book-card__image" src="${imageUrl}" data-fallback="${fallbackBookImage(book)}" alt="Ảnh bìa ${title}" loading="lazy">
+                <button class="favorite-button ${isFavorite ? "is-favorite" : ""}" type="button" data-favorite="${book.id}" aria-label="${isFavorite ? "Bỏ lưu" : "Lưu"} ${title}" aria-pressed="${isFavorite}">${isFavorite ? "♥" : "♡"}</button>
             </div>
-        </article>`;
+        </a>
+        <div class="book-card__body">
+            ${badge}
+            <h3 class="book-card__title"><a href="book-detail.html?id=${encodeURIComponent(book.id)}">${title}</a></h3>
+            <p class="book-card__subject">${subject}${code ? ` · ${code}` : ""}</p>
+            <strong class="price">${formatPrice(Number(book.price) || 0)}</strong>
+            <div class="seller-line"><span>${seller}</span>${location ? `<span class="book-card__location"> · ${location}</span>` : ""}</div>
+        </div>
+    </article>`;
 }
 
 async function toggleFavorite(bookId, button) {
@@ -225,12 +238,33 @@ function bindFavoriteButtons(root = document) {
 }
 
 function renderHomepage() {
-    const grid = document.querySelector("[data-featured-books]");
-    if (!grid) return;
-    Promise.all([api.get("/books/?page_size=6"), loadFavoriteBookIds()]).then(([data]) => {
-        grid.innerHTML = data.results.map(renderBookCard).join("");
-        bindFavoriteButtons(grid);
-    }).catch((error) => { grid.innerHTML = `<div class="empty-state">${error.message}</div>`; });
+    const newGrid = document.querySelector("[data-new-books]");
+    const collections = document.querySelector("[data-subject-collections]");
+    if (!newGrid || !collections) return;
+    const subjectSections = [
+        {key: "Công nghệ thông tin", title: "Công nghệ thông tin", description: "Giáo trình lập trình, dữ liệu và công nghệ.", tone: "blue"},
+        {key: "Vật lý", title: "Vật lý", description: "Tài liệu nền tảng cho những khám phá tự nhiên.", tone: "orange"},
+        {key: "Toán", title: "Toán học", description: "Từ giải tích đến xác suất và tư duy logic.", tone: "green"},
+        {key: "Hóa học", title: "Hóa học", description: "Giáo trình và tài liệu thực hành.", tone: "purple"},
+        {key: "Ngoại ngữ", title: "Ngoại ngữ", description: "Mở rộng vốn từ, mở rộng thế giới.", tone: "pink"},
+    ];
+    const renderCollection = (section, books) => {
+        if (!books.length) return "";
+        const query = encodeURIComponent(section.key);
+        return `<section class="page-shell collection-section collection-section--${section.tone}" aria-labelledby="collection-${section.tone}">
+            <div class="collection-heading"><div><span class="eyebrow">${section.key}</span><h2 id="collection-${section.tone}">${section.title}</h2><p>${section.description}</p></div><a class="text-link" href="books.html?q=${query}">Xem tất cả <span>→</span></a></div>
+            <div class="book-grid book-grid--storefront">${books.slice(0, 4).map(renderBookCard).join("")}</div>
+        </section>`;
+    };
+    Promise.all([api.get("/books/?page_size=24"), loadFavoriteBookIds()]).then(([data]) => {
+        const books = data.results || [];
+        newGrid.innerHTML = books.slice(0, 4).map(renderBookCard).join("");
+        collections.innerHTML = subjectSections.map((section) => renderCollection(section, books.filter((book) => (book.subject?.name || book.subject || "").toLowerCase().includes(section.key.toLowerCase())))).join("");
+        bindFavoriteButtons(document);
+        attachImageFallbacks(document);
+    }).catch((error) => {
+        newGrid.innerHTML = `<div class="empty-state"><strong>Không thể tải sách</strong><span>${escapeHtml(error.message)}</span></div>`;
+    });
 
     document.querySelector("[data-home-search]")?.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -241,6 +275,7 @@ function renderHomepage() {
 
 function renderSiteChrome() {
     const page = getCurrentPage();
+    document.body.classList.toggle("books-page", page === "books.html");
     const authenticated = isLoggedIn();
     const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
     const userName = user.name || "Nguyễn Lâm";
@@ -248,11 +283,13 @@ function renderSiteChrome() {
     const footer = document.querySelector("[data-site-footer]");
 
     if (header) {
+        const catalogBrand = page === "books.html"
+            ? `<span class="brand__icon" aria-hidden="true">📚</span><span class="brand__word">PASS<span>BOOK</span><small>student book market</small></span>`
+            : `<span class="brand__icon" aria-hidden="true">📚</span><span>PASSBOOK</span>`;
         header.innerHTML = `
             <nav class="navbar" aria-label="Điều hướng chính">
                 <a class="brand" href="index.html">
-                    <span class="brand__icon" aria-hidden="true">📚</span>
-                    <span>PASSBOOK</span>
+                    ${catalogBrand}
                 </a>
                 <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
                     <span aria-hidden="true">☰</span>
@@ -264,6 +301,12 @@ function renderSiteChrome() {
                         <a class="${page === "books.html" ? "is-active" : ""}" href="books.html">Tìm giáo trình</a>
                         <a class="${page === "sell.html" ? "is-active" : ""}" href="sell.html">Đăng bán</a>
                     </div>
+                    <form class="nav-search" data-nav-search>
+                        <label class="sr-only" for="nav-search-input">Tìm kiếm sách</label>
+                        <span aria-hidden="true">⌕</span>
+                        <input id="nav-search-input" name="q" type="search" placeholder="Tìm sách..." autocomplete="off">
+                        <button type="submit" aria-label="Tìm kiếm">→</button>
+                    </form>
                     <div class="nav-actions">
                         ${authenticated
                             ? `<button class="notification-button" type="button" data-notifications aria-label="Thông báo">🔔</button><a class="nav-user" href="profile.html"><span class="avatar" aria-hidden="true">${userName.slice(0, 2).toUpperCase()}</span><span>${userName}</span></a>
@@ -313,6 +356,11 @@ function renderSiteChrome() {
     document.querySelector("[data-logout]")?.addEventListener("click", () => {
         clearAuth();
         window.location.reload();
+    });
+    document.querySelector("[data-nav-search]")?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const query = new FormData(event.currentTarget).get("q")?.toString().trim();
+        window.location.href = query ? `books.html?q=${encodeURIComponent(query)}` : "books.html";
     });
     setupNotifications();
 }

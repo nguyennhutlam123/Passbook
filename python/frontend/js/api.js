@@ -1,5 +1,8 @@
+const localApiUrl = "http://127.0.0.1:8000/api";
 const productionApiUrl = "https://passbook-backend-6o0s.onrender.com/api";
-const API_BASE_URL = window.PASSBOOK_API_URL || productionApiUrl;
+const isLocalFrontend = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const API_BASE_URL = window.PASSBOOK_API_URL
+    || (isLocalFrontend ? localApiUrl : productionApiUrl);
 
 function getAccessToken() {
     return localStorage.getItem("accessToken");

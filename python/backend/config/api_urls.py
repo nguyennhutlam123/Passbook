@@ -1,5 +1,12 @@
+import hashlib
+import time
+
+from django.conf import settings
 from django.http import JsonResponse
 from django.urls import path
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from users.api_views import (
     AuthenticatedUserView,
@@ -36,8 +43,50 @@ def health_check(request):
     })
 
 
+class CloudinaryUploadSignatureView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        missing = [
+            name for name, value in (
+                ('CLOUDINARY_CLOUD_NAME', settings.CLOUDINARY_CLOUD_NAME),
+                ('CLOUDINARY_API_KEY', settings.CLOUDINARY_API_KEY),
+                ('CLOUDINARY_API_SECRET', settings.CLOUDINARY_API_SECRET),
+            ) if not value
+        ]
+        if missing:
+            return Response(
+                {'detail': 'Cloudinary chưa được cấu hình.', 'missing': missing},
+                status=503,
+            )
+
+        timestamp = int(time.time())
+        parameters = {
+            'folder': settings.CLOUDINARY_UPLOAD_FOLDER,
+            'timestamp': timestamp,
+        }
+        signature_base = '&'.join(
+            f'{key}={value}' for key, value in sorted(parameters.items())
+        )
+        signature = hashlib.sha1(
+            f'{signature_base}{settings.CLOUDINARY_API_SECRET}'.encode(),
+        ).hexdigest()
+        return Response({
+            'cloud_name': settings.CLOUDINARY_CLOUD_NAME,
+            'api_key': settings.CLOUDINARY_API_KEY,
+            'folder': settings.CLOUDINARY_UPLOAD_FOLDER,
+            'timestamp': timestamp,
+            'signature': signature,
+        })
+
+
 urlpatterns = [
     path('health/', health_check, name='health-check'),
+    path(
+        'uploads/cloudinary/signature/',
+        CloudinaryUploadSignatureView.as_view(),
+        name='cloudinary-upload-signature',
+    ),
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/authenticated-user/', AuthenticatedUserView.as_view(), name='authenticated-user'),

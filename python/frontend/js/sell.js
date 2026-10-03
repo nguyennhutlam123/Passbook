@@ -1,7 +1,6 @@
 document.addEventListener("DOMContentLoaded", () => {
     const form = document.querySelector("[data-sell-form]");
     if (!form) return;
-
     const imageFileInput = form.querySelector("#book-image-file");
     const submitButton = form.querySelector("button[type='submit']");
     const previews = form.querySelector("[data-upload-previews]");
@@ -78,7 +77,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!Number(data.get("price")) || Number(data.get("price")) <= 0) errors.price = "Giá phải lớn hơn 0.";
         if (!data.get("condition")) errors.condition = "Vui lòng chọn tình trạng.";
         if (!data.get("description")?.toString().trim()) errors.description = "Mô tả không được để trống.";
-
         const imageFile = imageFileInput?.files[0];
         if (!editing) {
             const imageError = validateImageFile(imageFile);
@@ -107,7 +105,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const book = editing
                 ? await api.patch(`/books/${editing.id}/`, payload)
                 : await api.post("/books/", payload);
-
             if (imageFile) {
                 operation = "lấy chữ ký Cloudinary";
                 submitButton.textContent = "Đang tải ảnh...";

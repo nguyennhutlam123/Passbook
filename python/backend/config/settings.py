@@ -29,6 +29,10 @@ SECRET_KEY = os.environ.get(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+PASSBOOK_ENVIRONMENT = os.environ.get(
+    'PASSBOOK_ENVIRONMENT',
+    'production',
+).lower()
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -84,6 +88,45 @@ CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET', '')
 CLOUDINARY_UPLOAD_FOLDER = os.environ.get(
     'CLOUDINARY_UPLOAD_FOLDER',
     'passbook/books',
+)
+PASSBOOK_PLATFORM_FEE_RATE = os.environ.get('PASSBOOK_PLATFORM_FEE_RATE', '0')
+PASSBOOK_FAKE_PAYMENTS_ENABLED = (
+    os.environ.get(
+        'PASSBOOK_FAKE_PAYMENTS_ENABLED',
+        'true' if PASSBOOK_ENVIRONMENT in ('local', 'test') else 'false',
+    ).lower() == 'true'
+)
+OTP_LENGTH = 6
+OTP_LIFETIME_SECONDS = int(os.environ.get('OTP_LIFETIME_SECONDS', '300'))
+OTP_MAX_ATTEMPTS = int(os.environ.get('OTP_MAX_ATTEMPTS', '5'))
+OTP_RESEND_COOLDOWN_SECONDS = int(
+    os.environ.get('OTP_RESEND_COOLDOWN_SECONDS', '60'),
+)
+OTP_MAX_RESENDS = int(os.environ.get('OTP_MAX_RESENDS', '5'))
+OTP_RESEND_WINDOW_SECONDS = int(
+    os.environ.get('OTP_RESEND_WINDOW_SECONDS', '3600'),
+)
+OTP_RESET_TOKEN_LIFETIME_SECONDS = int(
+    os.environ.get('OTP_RESET_TOKEN_LIFETIME_SECONDS', '600'),
+)
+PASSBOOK_SMS_DELIVERY_BACKEND = os.environ.get(
+    'PASSBOOK_SMS_DELIVERY_BACKEND',
+    '',
+)
+
+EMAIL_BACKEND = os.environ.get(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.smtp.EmailBackend',
+)
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() == 'true'
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'False').lower() == 'true'
+DEFAULT_FROM_EMAIL = os.environ.get(
+    'DEFAULT_FROM_EMAIL',
+    'noreply@passbook.local',
 )
 
 REST_FRAMEWORK = {

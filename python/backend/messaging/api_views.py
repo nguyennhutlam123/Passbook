@@ -1,31 +1,46 @@
+from datetime import timedelta
+
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from books.models import Book, BookImage
-from .models import Conversation, Message
+from books.api_views import optimized_books_queryset
+from books.pagination import BookPagination
+from books.models import Book
+from .models import Conversation, ConversationMember, Message
 from .serializers import ConversationSerializer, MessageSerializer
 
 
 def conversation_queryset():
-    return (
-        Conversation.objects
-        .select_related('book', 'buyer', 'seller')
-        .prefetch_related(
-            Prefetch('book__images', queryset=BookImage.objects.order_by('sort_order', 'id')),
-        )
+    return Conversation.objects.prefetch_related(
+        Prefetch(
+            'members',
+            queryset=ConversationMember.objects.select_related('user')
+            .order_by('joined_at', 'user_id'),
+        ),
+        Prefetch(
+            'messages',
+            queryset=Message.objects.order_by('-sent_at', '-id')[:1],
+            to_attr='latest_messages',
+        ),
     )
 
 
 def accessible_conversation(request, conversation_id):
-    conversation = get_object_or_404(conversation_queryset(), pk=conversation_id)
-    if request.user.id not in (conversation.buyer_id, conversation.seller_id):
+    conversation = get_object_or_404(
+        conversation_queryset(),
+        pk=conversation_id,
+    )
+    if not ConversationMember.objects.filter(
+        conversation_id=conversation.id,
+        user_id=request.user.id,
+    ).exists():
         raise PermissionDenied('Bạn không có quyền truy cập cuộc hội thoại này.')
     return conversation
 
@@ -34,35 +49,76 @@ class ConversationCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, book_id):
-        book = get_object_or_404(Book, pk=book_id)
-        if book.status in ('deleted', 'hidden'):
-            raise serializers.ValidationError({'book': 'Sách không còn khả dụng để liên hệ.'})
-        if book.seller_id == request.user.id:
+        book = get_object_or_404(
+            optimized_books_queryset(primary_images_only=True),
+            pk=book_id,
+            status='AVAILABLE',
+        )
+        if book.owner_id == request.user.id:
             return Response(
                 {'detail': 'Seller không thể tạo cuộc hội thoại với chính mình.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         now = timezone.now()
+        participant_ids = (request.user.id, book.owner_id)
+        candidate_ids = ConversationMember.objects.filter(
+            user_id=participant_ids[0],
+        ).values('conversation_id')
+        existing = (
+            Conversation.objects
+            .filter(conversation_type='SALE', id__in=candidate_ids)
+            .filter(members__user_id=participant_ids[1])
+            .order_by('-updated_at', '-id')
+            .first()
+        )
         with transaction.atomic():
-            conversation, _ = Conversation.objects.get_or_create(
-                book=book,
-                buyer=request.user,
-                seller_id=book.seller_id,
-                defaults={'created_at': now, 'updated_at': now},
-            )
+            if existing is None:
+                conversation = Conversation.objects.create(
+                    conversation_type='SALE',
+                    created_at=now,
+                    updated_at=now,
+                )
+                ConversationMember.objects.bulk_create([
+                    ConversationMember(
+                        conversation=conversation,
+                        user_id=request.user.id,
+                        joined_at=now,
+                    ),
+                    ConversationMember(
+                        conversation=conversation,
+                        user_id=book.owner_id,
+                        joined_at=now + timedelta(microseconds=1),
+                    ),
+                ])
+            else:
+                conversation = existing
         conversation = conversation_queryset().get(pk=conversation.pk)
-        return Response(ConversationSerializer(conversation).data, status=status.HTTP_201_CREATED)
+        conversation.book_context = book
+        return Response(
+            ConversationSerializer(conversation).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ConversationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        conversations = conversation_queryset().filter(
-            Q(buyer_id=request.user.id) | Q(seller_id=request.user.id),
-        ).order_by('-updated_at', '-id')
-        return Response(ConversationSerializer(conversations, many=True).data)
+        member = ConversationMember.objects.filter(
+            conversation_id=OuterRef('pk'),
+            user_id=request.user.id,
+        )
+        conversations = (
+            conversation_queryset()
+            .filter(Exists(member))
+            .order_by('-updated_at', '-id')
+        )
+        paginator = BookPagination()
+        page = paginator.paginate_queryset(conversations, request, view=self)
+        return paginator.get_paginated_response(
+            ConversationSerializer(page, many=True).data,
+        )
 
 
 class ConversationDetailView(APIView):
@@ -77,23 +133,45 @@ class MessageListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, conversation_id):
-        conversation = accessible_conversation(request, conversation_id)
-        messages = conversation.messages.select_related('sender').order_by('created_at', 'id')
-        return Response({
-            'conversation_id': conversation.id,
-            'results': MessageSerializer(messages, many=True).data,
-        })
+        conversation = get_object_or_404(
+            Conversation.objects.filter(members__user_id=request.user.id),
+            pk=conversation_id,
+        )
+        now = timezone.now()
+        ConversationMember.objects.filter(
+            conversation=conversation,
+            user=request.user,
+        ).update(last_read_at=now)
+        member_last_read_at = ConversationMember.objects.filter(
+            conversation_id=conversation.id,
+            user_id=request.user.id,
+        ).values('last_read_at')[:1]
+        messages = conversation.messages.select_related('sender').annotate(
+            reader_last_read_at=Subquery(member_last_read_at),
+        ).order_by('sent_at', 'id')
+        paginator = BookPagination()
+        page = paginator.paginate_queryset(messages, request, view=self)
+        response = paginator.get_paginated_response(
+            MessageSerializer(page, many=True).data,
+        )
+        response.data['conversation_id'] = conversation.id
+        return response
 
     def post(self, request, conversation_id):
         conversation = accessible_conversation(request, conversation_id)
         serializer = MessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        now = timezone.now()
         with transaction.atomic():
             message = serializer.save(
                 conversation=conversation,
                 sender=request.user,
-                created_at=timezone.now(),
+                message_type='TEXT',
+                sent_at=now,
             )
-            conversation.updated_at = timezone.now()
+            conversation.updated_at = now
             conversation.save(update_fields=['updated_at'])
-        return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)
+        return Response(
+            MessageSerializer(message).data,
+            status=status.HTTP_201_CREATED,
+        )

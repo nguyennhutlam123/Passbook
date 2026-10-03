@@ -23,9 +23,22 @@ class NotificationReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, notification_id):
-        notification = get_object_or_404(Notification, pk=notification_id)
-        if notification.user_id != request.user.id:
-            self.permission_denied(request, message='Bạn không có quyền cập nhật thông báo này.')
+        notification = get_object_or_404(
+            Notification,
+            pk=notification_id,
+            user=request.user,
+        )
         notification.is_read = True
         notification.save(update_fields=['is_read'])
         return Response({'id': notification.id, 'is_read': notification.is_read})
+
+
+class NotificationReadAllView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        updated = Notification.objects.filter(
+            user_id=request.user.id,
+            is_read=False,
+        ).update(is_read=True)
+        return Response({'updated_count': updated})

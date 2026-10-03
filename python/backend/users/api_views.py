@@ -1,12 +1,20 @@
 from django.contrib.auth.hashers import check_password, make_password
+from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.settings import api_settings
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework.exceptions import AuthenticationFailed
 
-from .models import User
+from books.pagination import BookPagination
+from .models import User, UserAddress
 from .serializers import (
     LoginSerializer,
     ChangePasswordSerializer,
@@ -14,20 +22,32 @@ from .serializers import (
     PublicSellerSerializer,
     RegisterSerializer,
     RegisteredUserSerializer,
+    UserAddressSerializer,
 )
+from .services import issue_otp
+from .tokens import refresh_token_for_user, revoke_token_pair
 
 
 class RegisterView(APIView):
+    @transaction.atomic
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        issue_otp(
+            target=user.email,
+            channel='EMAIL',
+            purpose='REGISTER',
+            user=user,
+        )
         return Response(
             {
-                'message': 'Đăng ký thành công',
+                'message': 'Đăng ký thành công. Vui lòng xác minh email.',
+                'verification_required': True,
+                'target': user.email,
                 'user': RegisteredUserSerializer(user).data,
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_202_ACCEPTED,
         )
 
 
@@ -36,17 +56,30 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        email = serializer.validated_data['email']
+        email = serializer.validated_data.get('email')
+        phone = serializer.validated_data.get('phone')
         password = serializer.validated_data['password']
-        user = User.objects.filter(email=email).first()
+        if email:
+            user = User.objects.filter(email=email).first()
+        else:
+            phone_matches = list(
+                User.objects.filter(phone=phone).order_by('id')[:2],
+            )
+            user = phone_matches[0] if len(phone_matches) == 1 else None
 
         if user is None:
             return Response(
-                {'detail': 'Email hoặc mật khẩu không đúng.'},
+                {'detail': 'Thông tin đăng nhập không đúng.'},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        if user.status != 'active':
+        if user.status == 'PENDING_VERIFICATION':
+            return Response(
+                {'detail': 'Vui lòng xác minh tài khoản trước khi đăng nhập.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if user.status != 'ACTIVE':
             return Response(
                 {'detail': 'Tài khoản không hoạt động.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -54,8 +87,30 @@ class LoginView(APIView):
 
         if not check_password(password, user.password_hash):
             return Response(
-                {'detail': 'Email hoặc mật khẩu không đúng.'},
+                {'detail': 'Thông tin đăng nhập không đúng.'},
                 status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        otp_channel = serializer.validated_data.get('otp_channel')
+        if otp_channel:
+            target = user.email if otp_channel == 'EMAIL' else user.phone
+            if not target:
+                raise serializers.ValidationError({
+                    'otp_channel': 'Tài khoản chưa có thông tin cho kênh xác minh này.',
+                })
+            issue_otp(
+                target=target,
+                channel=otp_channel,
+                purpose='LOGIN',
+                user=user,
+            )
+            return Response(
+                {
+                    'verification_required': True,
+                    'target': target,
+                    'purpose': 'LOGIN',
+                },
+                status=status.HTTP_202_ACCEPTED,
             )
 
         refresh = RefreshToken.for_user(user)
@@ -65,6 +120,54 @@ class LoginView(APIView):
             'refresh': str(refresh),
             'user': RegisteredUserSerializer(user).data,
         })
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = LogoutInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = refresh_token_for_user(
+            serializer.validated_data['refresh'],
+            request.user.id,
+        )
+        access_token = request.auth
+        if access_token is None:
+            raise AuthenticationFailed('Access token không hợp lệ.')
+        revoke_token_pair(access_token, token)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LogoutInputSerializer(serializers.Serializer):
+    refresh = serializers.CharField(write_only=True, allow_blank=False, trim_whitespace=True)
+
+
+class ActiveUserTokenRefreshSerializer(TokenRefreshSerializer):
+    def validate(self, attrs):
+        refresh = refresh_token_for_user(attrs['refresh'])
+        user_id = refresh.payload.get(api_settings.USER_ID_CLAIM)
+        if user_id is None or not User.objects.filter(
+            pk=user_id,
+            status='ACTIVE',
+        ).exists():
+            raise AuthenticationFailed('Tài khoản không hoạt động.')
+        data = {'access': str(refresh.access_token)}
+        if api_settings.ROTATE_REFRESH_TOKENS:
+            if api_settings.BLACKLIST_AFTER_ROTATION:
+                try:
+                    refresh.blacklist()
+                except AttributeError:
+                    pass
+            refresh.set_jti()
+            refresh.set_exp()
+            refresh.set_iat()
+            data['refresh'] = str(refresh)
+        return data
+
+
+class ActiveUserTokenRefreshView(TokenRefreshView):
+    serializer_class = ActiveUserTokenRefreshSerializer
 
 
 class AuthenticatedUserView(APIView):
@@ -113,9 +216,74 @@ class SellerProfileView(APIView):
     def get(self, request, user_id):
         user = User.objects.select_related('university').filter(
             pk=user_id,
-            status='active',
+            status='ACTIVE',
         ).first()
         if user is None:
             from django.http import Http404
             raise Http404
         return Response(PublicSellerSerializer(user).data)
+
+
+class UserAddressListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        addresses = UserAddress.objects.filter(user=request.user).order_by(
+            '-is_default', '-created_at', '-id',
+        )
+        paginator = BookPagination()
+        page = paginator.paginate_queryset(addresses, request, view=self)
+        return paginator.get_paginated_response(
+            UserAddressSerializer(page, many=True).data,
+        )
+
+    def post(self, request):
+        serializer = UserAddressSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        now = timezone.now()
+        with transaction.atomic():
+            if serializer.validated_data.get('is_default'):
+                UserAddress.objects.filter(user=request.user).update(is_default=False)
+            address = serializer.save(
+                user=request.user,
+                created_at=now,
+                updated_at=now,
+            )
+        return Response(
+            UserAddressSerializer(address).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class UserAddressDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, address_id):
+        address = get_object_or_404(
+            UserAddress,
+            pk=address_id,
+            user=request.user,
+        )
+        serializer = UserAddressSerializer(
+            address,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        now = timezone.now()
+        with transaction.atomic():
+            if serializer.validated_data.get('is_default') is True:
+                UserAddress.objects.filter(user=request.user).exclude(
+                    pk=address.pk,
+                ).update(is_default=False)
+            address = serializer.save(updated_at=now)
+        return Response(UserAddressSerializer(address).data)
+
+    def delete(self, request, address_id):
+        address = get_object_or_404(
+            UserAddress,
+            pk=address_id,
+            user=request.user,
+        )
+        address.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

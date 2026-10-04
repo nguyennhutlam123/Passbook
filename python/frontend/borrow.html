@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mượn giáo trình - PassBook</title>
+    <title>Mượn sách - PassBook</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
         <div class="catalog-layout">
             <aside class="filter-panel" aria-label="Bộ lọc sách cho mượn">
                 <div class="filter-heading">
-                    <h1>Mượn giáo trình</h1>
+                    <h2>Bộ lọc</h2>
                     <button class="button button-outline filter-close" type="button" data-filter-close>Đóng</button>
                 </div>
                 <div class="form-group">
@@ -75,6 +75,14 @@
                     <label class="form-label" for="filter-max-price">Phí mượn tối đa</label>
                     <input id="filter-max-price" type="number" min="0" step="1000" placeholder="Không giới hạn">
                 </div>
+                <label class="sort-control">Sắp xếp
+                    <select id="sort-books">
+                        <option value="newest">Mới nhất</option>
+                        <option value="oldest">Cũ nhất</option>
+                        <option value="price-asc">Phí mượn thấp → cao</option>
+                        <option value="price-desc">Phí mượn cao → thấp</option>
+                    </select>
+                </label>
                 <button class="button button-primary" type="button" data-apply-filters>Lọc</button>
                 <p class="caption">Chỉ hiển thị tin cho mượn đang khả dụng.</p>
                 <button class="button button-outline" type="button" data-reset-filters>Xóa bộ lọc</button>
@@ -82,17 +90,9 @@
             <section class="catalog-results" aria-live="polite">
                 <div class="results-toolbar">
                     <div>
-                        <button class="button button-outline filter-open" type="button" data-filter-open>Bộ lọc</button>
+                        <button class="button button-outline filter-open" type="button" data-filter-open aria-expanded="false">Bộ lọc <span aria-hidden="true">⌄</span></button>
                         <p class="caption" data-result-count>Đang tải sách...</p>
                     </div>
-                    <label class="sort-control">Sắp xếp
-                        <select id="sort-books">
-                            <option value="newest">Mới nhất</option>
-                            <option value="oldest">Cũ nhất</option>
-                            <option value="price-asc">Phí mượn thấp → cao</option>
-                            <option value="price-desc">Phí mượn cao → thấp</option>
-                        </select>
-                    </label>
                 </div>
                 <p class="form-error" role="alert" data-filter-error></p>
                 <div class="book-grid" data-catalog-grid></div>

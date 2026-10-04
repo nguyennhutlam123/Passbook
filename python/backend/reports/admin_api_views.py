@@ -46,6 +46,15 @@ class AdminReportUpdateSerializer(serializers.Serializer):
         allow_null=True,
     )
 
+    def validate(self, attrs):
+        if attrs['status'] in ('RESOLVED', 'REJECTED') and not (
+            attrs.get('resolution_note') or ''
+        ).strip():
+            raise serializers.ValidationError({
+                'resolution_note': 'Nhập ghi chú khi đóng báo cáo.',
+            })
+        return attrs
+
 
 class AdminReportListView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]

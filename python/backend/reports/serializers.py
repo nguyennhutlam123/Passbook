@@ -6,6 +6,16 @@ from users.models import User
 from .models import Report
 
 
+REPORT_REASONS = (
+    'INAPPROPRIATE_CONTENT',
+    'INCORRECT_BOOK_INFO',
+    'SPAM',
+    'SCAM',
+    'POLICY_VIOLATION',
+    'OTHER',
+)
+
+
 class ReportSerializer(serializers.ModelSerializer):
     book_id = serializers.IntegerField(source='book.id', read_only=True, allow_null=True)
     status = serializers.SerializerMethodField()
@@ -45,14 +55,8 @@ class ReportCreateSerializer(serializers.Serializer):
     message_id = serializers.PrimaryKeyRelatedField(
         source='message', queryset=Message.objects.all(), required=False, allow_null=True,
     )
-    reason = serializers.CharField(max_length=100, allow_blank=False, trim_whitespace=True)
+    reason = serializers.ChoiceField(choices=REPORT_REASONS)
     description = serializers.CharField(max_length=5000, required=False, allow_blank=True)
-
-    def validate_reason(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError('Lý do không được để trống.')
-        return value
 
     def validate(self, attrs):
         targets = ('reported_user', 'book', 'sale_listing', 'lend_listing', 'message')

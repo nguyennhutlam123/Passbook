@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from config.cloudinary import verify_cloudinary_image
 from .models import (
     Book,
     BookIdentifier,
@@ -268,6 +269,13 @@ class BookListView(APIView):
         if category_id is not None:
             queryset = queryset.filter(
                 book_edition__book_work__category_id=category_id,
+                book_edition__book_work__category__status='ACTIVE',
+            )
+        category_slug = (query_params.get('category_slug') or '').strip()
+        if category_slug:
+            queryset = queryset.filter(
+                book_edition__book_work__category__slug=category_slug,
+                book_edition__book_work__category__status='ACTIVE',
             )
         edition = query_params.get('edition')
         if edition:
@@ -499,6 +507,18 @@ class MyBooksView(APIView):
 
 class BookDetailView(APIView):
     def get(self, request, pk):
+        if request.user.is_authenticated:
+            own_pending_book = optimized_books_queryset(
+                include_history=True,
+            ).filter(
+                owner_id=request.user.id,
+                status='AVAILABLE',
+                sale_listings__status='PENDING',
+                pk=pk,
+            ).first()
+            if own_pending_book is not None:
+                return Response(BookSerializer(own_pending_book).data)
+
         book = get_object_or_404(
             optimized_books_queryset().filter(
                 status='AVAILABLE',
@@ -593,30 +613,60 @@ class BookImageListView(APIView):
         book = self._get_editable_book(request, book_id)
         serializer = BookImageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        verify_cloudinary_image(
+            user_id=request.user.id,
+            image_url=serializer.validated_data['image_url'],
+            public_id=serializer.validated_data.get('cloudinary_public_id'),
+        )
         now = timezone.now()
         with transaction.atomic():
-            current_images = BookImage.objects.select_for_update().filter(book=book)
-            if current_images.count() >= 10:
+            book = Book.objects.select_for_update().get(pk=book.pk)
+            current_images = list(
+                BookImage.objects.select_for_update()
+                .filter(book=book)
+                .order_by('sort_order', 'id'),
+            )
+            if len(current_images) >= 10:
                 raise serializers.ValidationError({
                     'images': 'Mỗi sách được đăng tối đa 10 ảnh.',
                 })
             image_url = serializer.validated_data['image_url']
             public_id = serializer.validated_data.get('cloudinary_public_id')
-            if current_images.filter(image_url=image_url).exists() or (
-                public_id
-                and current_images.filter(cloudinary_public_id=public_id).exists()
+            if any(
+                image.image_url == image_url
+                or (
+                    public_id
+                    and image.cloudinary_public_id == public_id
+                )
+                for image in current_images
             ):
                 raise serializers.ValidationError({
                     'image_url': 'Ảnh này đã được thêm vào sách.',
                 })
+            public_id = serializer.validated_data.get('cloudinary_public_id')
+            if public_id and BookImage.objects.filter(
+                cloudinary_public_id=public_id,
+            ).exists():
+                raise serializers.ValidationError({
+                    'cloudinary_public_id': 'Ảnh đã được gắn với một tin đăng khác.',
+                })
             is_primary = serializer.validated_data.get('is_primary', False)
-            if not current_images.exists():
-                is_primary = True
-            if is_primary:
+            current_primary = next(
+                (current for current in current_images if current.is_primary),
+                None,
+            )
+            if is_primary or current_primary is None:
                 BookImage.objects.filter(book=book, is_primary=True).update(
                     is_primary=False,
                 )
+                is_primary = True
+            else:
+                BookImage.objects.filter(
+                    book=book,
+                    is_primary=True,
+                ).exclude(pk=current_primary.pk).update(is_primary=False)
             serializer.validated_data['is_primary'] = is_primary
+            serializer.validated_data['sort_order'] = len(current_images)
             image = serializer.save(book=book, created_at=now)
         return Response(BookImageSerializer(image).data, status=status.HTTP_201_CREATED)
 
@@ -637,31 +687,83 @@ class BookImageListView(APIView):
 class BookImageDetailView(APIView):
     def patch(self, request, book_id, image_id):
         book = BookImageListView._get_editable_book(request, book_id)
-        image = get_object_or_404(BookImage, pk=image_id, book=book)
-        serializer = BookImageSerializer(image, data=request.data, partial=True)
+        if {'image_url', 'cloudinary_public_id'} & set(request.data):
+            raise serializers.ValidationError({
+                'image': 'Không thể thay đổi URL hoặc public ID của ảnh hiện có.',
+            })
+        serializer = BookImageSerializer(
+            data=request.data,
+            partial=True,
+        )
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
-            if serializer.validated_data.get('is_primary') is True:
-                BookImage.objects.filter(
-                    book=book,
-                    is_primary=True,
-                ).exclude(pk=image.pk).update(is_primary=False)
-            image = serializer.save()
+            Book.objects.select_for_update().get(pk=book.pk)
+            images = list(
+                BookImage.objects.select_for_update()
+                .filter(book=book)
+                .order_by('sort_order', 'id'),
+            )
+            image = next((item for item in images if item.id == image_id), None)
+            if image is None:
+                raise serializers.ValidationError({
+                    'image': 'Ảnh không thuộc sách này.',
+                })
+            if 'sort_order' in serializer.validated_data:
+                position = serializer.validated_data['sort_order']
+                if position >= len(images):
+                    raise serializers.ValidationError({
+                        'sort_order': 'Thứ tự ảnh phải nằm trong danh sách hiện tại.',
+                    })
+                images.remove(image)
+                images.insert(position, image)
+                for order, item in enumerate(images):
+                    item.sort_order = order
+            previous_primary = next(
+                (item for item in images if item.is_primary),
+                None,
+            )
+            if 'is_primary' in serializer.validated_data:
+                primary = (
+                    image
+                    if serializer.validated_data['is_primary']
+                    else next(
+                        (item for item in images if item != image and item.is_primary),
+                        None,
+                    )
+                )
+            else:
+                primary = previous_primary
+            if primary is None and images:
+                primary = images[0]
+            for item in images:
+                item.is_primary = item == primary
+                item.save(update_fields=['sort_order', 'is_primary'])
         return Response(BookImageSerializer(image).data)
 
     def delete(self, request, book_id, image_id):
         book = BookImageListView._get_editable_book(request, book_id)
-        image = get_object_or_404(BookImage, pk=image_id, book=book)
         with transaction.atomic():
+            Book.objects.select_for_update().get(pk=book.pk)
+            image = get_object_or_404(
+                BookImage.objects.select_for_update(),
+                pk=image_id,
+                book=book,
+            )
             was_primary = image.is_primary
             image.delete()
-            remaining = BookImage.objects.filter(book=book)
-            if was_primary and remaining.exists() and not remaining.filter(
-                is_primary=True,
-            ).exists():
-                promoted = remaining.order_by('sort_order', 'id').first()
-                promoted.is_primary = True
-                promoted.save(update_fields=['is_primary'])
+            remaining = list(
+                BookImage.objects.filter(book=book).order_by('sort_order', 'id'),
+            )
+            primary = next(
+                (item for item in remaining if item.is_primary),
+                None,
+            )
+            if was_primary or primary is None:
+                primary = next(iter(remaining), None)
+            for order, remaining_image in enumerate(remaining):
+                remaining_image.sort_order = order
+                remaining_image.is_primary = remaining_image == primary
+                remaining_image.save(update_fields=['sort_order', 'is_primary'])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

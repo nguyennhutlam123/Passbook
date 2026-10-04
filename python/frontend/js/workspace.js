@@ -1,12 +1,14 @@
 document.addEventListener("DOMContentLoaded", () => {
     const page = document.querySelector("[data-workspace-page]");
     if (!page || !PassbookGuards.requireAuth()) return;
+    const workspaceView = page.dataset.workspaceView || "all";
 
     const cartItems = page.querySelector("[data-cart-items]");
     const cartTotal = page.querySelector("[data-cart-total]");
     const checkoutForm = page.querySelector("[data-checkout-form]");
     const checkoutSummary = page.querySelector("[data-checkout-summary]");
     const cartError = page.querySelector("[data-cart-error]");
+    const checkoutSuccess = page.querySelector("[data-checkout-success]");
     const ordersList = page.querySelector("[data-orders-list]");
     const reservationsList = page.querySelector("[data-reservations-list]");
     const borrowsList = page.querySelector("[data-borrows-list]");
@@ -16,6 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     const checkoutKeyStorage = "passbook.checkout.idempotencyKey";
     let selectedCartItemId = null;
+    let buyNowProcessed = false;
     let orderPage = 1;
     let reservationPage = 1;
     let borrowPage = 1;
@@ -28,6 +31,33 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const money = (value) => formatPrice(Number(value) || 0);
+
+    const trackingLabel = (status) => ({
+        PENDING: "Chờ bàn giao",
+        PICKED_UP: "Đã lấy hàng",
+        IN_TRANSIT: "Đang vận chuyển",
+        OUT_FOR_DELIVERY: "Đang giao",
+        DELIVERED: "Đã giao",
+    })[status] || status || "—";
+
+    const returnMethodLabel = (method) => ({
+        DELIVERY: "Giao hàng",
+    })[method] || method;
+
+    const ticketDetails = (entries) => {
+        const details = document.createElement("dl");
+        details.className = "borrow-ticket__details";
+        entries.filter(([, value]) => value).forEach(([label, value]) => {
+            const item = document.createElement("div");
+            const term = document.createElement("dt");
+            term.textContent = label;
+            const description = document.createElement("dd");
+            description.textContent = value;
+            item.append(term, description);
+            details.append(item);
+        });
+        return details;
+    };
 
     const pagination = (data, pageNumber, setPage, reload) => {
         if (!data.previous && !data.next) return null;
@@ -69,6 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     const lines = [
                         `${quote.items[0]?.title || item.title} · ${money(quote.items[0]?.subtotal || 0)}`,
                         `Tạm tính: ${money(quote.subtotal)}`,
+                        `Phí nền tảng 10%: ${money(quote.platform_fee || 0)}`,
                         `Phí vận chuyển: ${money(quote.shipping_total)}`,
                         `Tổng tiền: ${money(quote.total_amount)}`,
                     ];
@@ -92,20 +123,46 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const cart = await OrdersAPI.cart();
             const items = Array.isArray(cart.items) ? cart.items : [];
+            const buyNowListingId = new URLSearchParams(location.search).get("buy_now");
             if (!items.length) {
                 setMessage(cartItems, "Giỏ hàng đang trống.");
                 cartTotal.textContent = "";
                 checkoutForm.hidden = true;
                 selectedCartItemId = null;
+                if (buyNowListingId) {
+                    const query = new URLSearchParams(location.search);
+                    query.delete("buy_now");
+                    const suffix = query.toString();
+                    history.replaceState(null, "", `${location.pathname}${suffix ? `?${suffix}` : ""}${location.hash}`);
+                    cartError.textContent = "Không tìm thấy sách vừa chọn. Kiểm tra lại giỏ hàng.";
+                } else {
+                    cartError.textContent = "";
+                }
                 return;
             }
             cartItems.replaceChildren(...items.map(itemCard));
             cartTotal.textContent = `Tổng cộng: ${money(cart.total_amount)}`;
+            cartError.textContent = "";
+            if (buyNowListingId && !buyNowProcessed) {
+                buyNowProcessed = true;
+                const target = items.find((item) =>
+                    String(item.listing_id) === buyNowListingId && item.listing_type !== "BORROW",
+                );
+                const query = new URLSearchParams(location.search);
+                query.delete("buy_now");
+                const suffix = query.toString();
+                history.replaceState(null, "", `${location.pathname}${suffix ? `?${suffix}` : ""}${location.hash}`);
+                if (target) {
+                    cartItems.querySelector(`[data-cart-item="${CSS.escape(String(target.id))}"]`)
+                        ?.querySelector("[data-cart-buy]")?.click();
+                } else {
+                    cartError.textContent = "Không tìm thấy sách vừa chọn. Kiểm tra lại giỏ hàng.";
+                }
+            }
             if (selectedCartItemId && !items.some((item) => item.id === selectedCartItemId)) {
                 selectedCartItemId = null;
                 checkoutForm.hidden = true;
             }
-            cartError.textContent = "";
         } catch (error) {
             setMessage(cartItems, error.message, "form-error");
             checkoutForm.hidden = true;
@@ -121,13 +178,26 @@ document.addEventListener("DOMContentLoaded", () => {
         return key;
     }
 
-    page.querySelector("[data-checkout-cancel]").addEventListener("click", () => {
+    page.querySelector("[data-checkout-cancel]")?.addEventListener("click", () => {
         selectedCartItemId = null;
         checkoutForm.hidden = true;
         cartError.textContent = "";
     });
 
-    checkoutForm.addEventListener("submit", async (event) => {
+    const paymentMethod = checkoutForm?.querySelector("[name='payment_method']");
+    const fakeOptions = checkoutForm?.querySelector("[data-fake-payment-options]");
+    const bankTransferNote = checkoutForm?.querySelector("[data-bank-transfer-note]");
+    const codNote = checkoutForm?.querySelector("[data-cod-note]");
+    const updatePaymentInstructions = () => {
+        const method = paymentMethod?.value;
+        if (fakeOptions) fakeOptions.hidden = method !== "FAKE";
+        if (bankTransferNote) bankTransferNote.hidden = method !== "BANK_TRANSFER";
+        if (codNote) codNote.hidden = method !== "COD";
+    };
+    paymentMethod?.addEventListener("change", updatePaymentInstructions);
+    updatePaymentInstructions();
+
+    checkoutForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (selectedCartItemId === null) {
             cartError.textContent = "Chọn sản phẩm cần mua trong giỏ hàng.";
@@ -165,20 +235,52 @@ document.addEventListener("DOMContentLoaded", () => {
         const submit = checkoutForm.querySelector("button[type='submit']");
         submit.disabled = true;
         cartError.textContent = "";
-        try {
-            const result = await OrdersAPI.checkout({
+        const payload = {
                 idempotency_key: checkoutKey(),
                 cart_item_id: selectedCartItemId,
                 shipping_address_snapshot: shippingSnapshot,
                 payment_outcome: data.get("payment_outcome"),
-                payment_method: "TEST",
+                payment_method: data.get("payment_method"),
                 borrow,
-            });
+            };
+        const completeCheckout = async () => {
+            const result = await OrdersAPI.checkout(payload);
             sessionStorage.removeItem(checkoutKeyStorage);
             selectedCartItemId = null;
             checkoutForm.hidden = true;
-            showToast(`Thanh toán thành công · đơn ${result.orders?.[0]?.order_code || result.checkout_code}.`);
-            await Promise.all([loadCart(), loadOrders()]);
+            const firstOrder = result.orders?.[0];
+            if (checkoutSuccess && firstOrder) {
+                const heading = document.createElement("h2");
+                heading.textContent = firstOrder.payment_status === "PROCESSING"
+                    ? "Đơn hàng đang chờ xác minh chuyển khoản"
+                    : firstOrder.payment_method === "COD"
+                        ? "Đã tạo đơn hàng COD"
+                        : "Đặt hàng thành công";
+                const description = document.createElement("p");
+                description.textContent = [
+                    `Đơn ${firstOrder.order_code} đã được tạo.`,
+                    `Order: ${firstOrder.status}`,
+                    `Payment: ${firstOrder.payment_status || "—"}`,
+                    firstOrder.payment_method === "COD"
+                        ? "COD chưa được xác nhận đã thu tiền."
+                        : "",
+                ].filter(Boolean).join(" · ");
+                const link = document.createElement("a");
+                link.className = "button button-primary";
+                link.href = `orders.html?order_id=${encodeURIComponent(firstOrder.id)}`;
+                link.textContent = "Xem đơn hàng mới";
+                checkoutSuccess.replaceChildren(heading, description, link);
+                checkoutSuccess.hidden = false;
+            } else {
+                showToast(`Thanh toán thành công · đơn ${firstOrder?.order_code || result.checkout_code}.`);
+            }
+            await Promise.all([
+                loadCart(),
+                ordersList ? loadOrders() : Promise.resolve(),
+            ]);
+        };
+        try {
+            await completeCheckout();
         } catch (error) {
             cartError.textContent = (
                 error.status === 409
@@ -530,13 +632,13 @@ document.addEventListener("DOMContentLoaded", () => {
         )) {
             addAction("cancel", "Hủy yêu cầu");
         }
-        if (reservation.status === "CONFIRMED" && (isRequester || isOwner)) {
-            addAction(
-                "complete",
-                reservation.listing_type === "BORROW"
-                    ? (isRequester ? "Đánh dấu đã trả" : "Xác nhận đã nhận lại")
-                    : "Hoàn tất",
-            );
+        if (reservation.status === "CONFIRMED" && reservation.listing_type !== "BORROW"
+            && (isRequester || isOwner)) {
+            addAction("complete", "Hoàn tất");
+        }
+        if (reservation.status === "CONFIRMED" && isRequester
+            && reservation.listing_type === "BORROW") {
+            addAction("complete", "Tôi đã trả sách");
         }
     };
 
@@ -544,33 +646,87 @@ document.addEventListener("DOMContentLoaded", () => {
         setMessage(reservationsList, "Đang tải yêu cầu...", "loading-state");
         try {
             const data = await ReservationsAPI.list({page: reservationPage, page_size: 50});
-            const nodes = (data.results || []).map((reservation) => {
+            const borrowReservations = (data.results || []).filter(
+                (reservation) => reservation.listing_type === "BORROW",
+            );
+            const nodes = borrowReservations.map((reservation) => {
                 const card = document.createElement("article");
-                card.className = "report-item";
+                card.className = "report-item borrow-ticket-card";
+                card.dataset.reservationId = String(reservation.id);
+                if (reservation.book?.primary_image) {
+                    const image = document.createElement("img");
+                    image.className = "order-item__image";
+                    image.src = reservation.book.primary_image;
+                    image.alt = `Ảnh ${reservation.book.title || "sách mượn"}`;
+                    image.addEventListener("error", () => image.remove(), {once: true});
+                    card.append(image);
+                }
                 const title = document.createElement("strong");
-                title.textContent = reservation.listing_type === "BORROW"
-                    ? `Yêu cầu mượn sách #${reservation.book_id}`
-                    : `Đặt giữ sách #${reservation.book_id}`;
+                title.textContent = reservation.book?.title || `Yêu cầu mượn sách #${reservation.book_id}`;
                 const status = document.createElement("span");
-                status.textContent = reservation.listing_type === "BORROW"
-                    && reservation.status === "CONFIRMED"
-                    ? "Đang mượn · chờ xác nhận trả sách"
-                    : `${reservation.status} · hết hạn ${new Date(reservation.expires_at).toLocaleString("vi-VN")}`;
-                card.append(title, status);
+                const statusLabels = {
+                    PENDING: "Chờ người cho mượn xác nhận",
+                    CONFIRMED: "Đang mượn",
+                    REJECTED: "Đã từ chối",
+                    CANCELLED: "Đã hủy",
+                    EXPIRED: "Yêu cầu đã hết hạn",
+                    COMPLETED: "Đã hoàn tất trả sách",
+                };
+                status.className = `borrow-ticket__status borrow-ticket__status--${String(reservation.status).toLowerCase()}`;
+                status.textContent = statusLabels[reservation.status] || reservation.status;
+                const details = ticketDetails([
+                    ["Mã phiếu", `#${reservation.id}`],
+                    ["Người cho mượn", reservation.lender?.name],
+                    ["Người mượn", reservation.requester?.name],
+                    ["Môn học", [reservation.book?.subject?.name, reservation.book?.subject?.code]
+                        .filter(Boolean).join(" · ")],
+                    ["Danh mục", reservation.book?.category],
+                    ["Ấn bản", [reservation.book?.edition, reservation.book?.publication_year]
+                        .filter(Boolean).join(" · ")],
+                    ["Tình trạng", reservation.book?.condition_status],
+                    ["Trường", reservation.lender?.university],
+                    ["Khoa / ngành", [reservation.lender?.faculty, reservation.lender?.major]
+                        .filter(Boolean).join(" · ")],
+                    ["Tạo lúc", reservation.created_at
+                        ? new Date(reservation.created_at).toLocaleString("vi-VN")
+                        : ""],
+                    ["Hạn phản hồi", reservation.status === "PENDING" && reservation.expires_at
+                        ? new Date(reservation.expires_at).toLocaleString("vi-VN")
+                        : ""],
+                    ["Phí mượn", reservation.listing?.rental_fee !== undefined
+                        ? money(reservation.listing.rental_fee)
+                        : ""],
+                    ["Tiền đặt cọc", reservation.listing?.deposit_amount
+                        ? money(reservation.listing.deposit_amount)
+                        : ""],
+                    ["Thời hạn tối đa", reservation.listing?.borrow_terms?.max_days
+                        ? `${reservation.listing.borrow_terms.max_days} ngày`
+                        : ""],
+                    ["Cách trả", reservation.listing?.borrow_terms?.return_method],
+                    ["Điều kiện", reservation.listing?.borrow_terms?.notes],
+                ]);
+                card.append(title, status, details);
+                if (reservation.book?.description) {
+                    const description = document.createElement("p");
+                    description.className = "borrow-ticket__description";
+                    description.textContent = reservation.book.description;
+                    card.append(description);
+                }
                 reservationActions(reservation, card);
                 return card;
             });
-            if (!nodes.length) {
-                nodes.push(PassbookCommonComponents.emptyState("Chưa có yêu cầu đặt giữ."));
-            }
-            const controls = pagination(
-                data,
-                reservationPage,
-                (value) => { reservationPage = value; },
-                loadReservations,
-            );
+            const controls = borrowReservations.length
+                ? pagination(
+                    data,
+                    reservationPage,
+                    (value) => { reservationPage = value; },
+                    loadReservations,
+                )
+                : null;
             if (controls) nodes.push(controls);
+            reservationsList.classList.toggle("report-list", borrowReservations.length > 0);
             reservationsList.replaceChildren(...nodes);
+            focusRequestedTicket("reservation_id", "reservationId");
         } catch (error) {
             setMessage(reservationsList, error.message, "form-error");
         }
@@ -586,9 +742,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (borrow.status === "CONFIRMED" && isLender) return [["ready", "Chuẩn bị sách"]];
         if (borrow.status === "READY_FOR_PICKUP" && isBorrower) return [["start", "Đã nhận sách"]];
-        if (["ACTIVE", "OVERDUE"].includes(borrow.status)) return [["request-return", "Yêu cầu trả"]];
-        if (borrow.status === "RETURN_REQUESTED") return [["return", "Đã nhận lại sách"]];
-        if (borrow.status === "RETURNED") return [["complete", "Hoàn tất giao dịch"]];
+        if (
+            ["ACTIVE", "OVERDUE"].includes(borrow.status)
+            && isBorrower
+        ) return [["request-return", "Trả sách"]];
+        if (
+            borrow.status === "RETURNED"
+            && borrow.return_status === "DELIVERED"
+            && isLender
+        ) return [["complete", "Xác nhận đã nhận sách"]];
         return [];
     };
 
@@ -598,25 +760,83 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await OrdersAPI.borrowOrders({page: borrowPage, page_size: 50});
             const nodes = (data.results || []).map((borrow) => {
                 const card = document.createElement("article");
-                card.className = "report-item";
+                card.className = "report-item borrow-ticket-card";
+                card.dataset.borrowId = String(borrow.id);
+                if (borrow.image_url) {
+                    const image = document.createElement("img");
+                    image.className = "order-item__image";
+                    image.src = borrow.image_url;
+                    image.alt = `Ảnh ${borrow.title || "sách mượn"}`;
+                    image.addEventListener("error", () => image.remove(), {once: true});
+                    card.append(image);
+                }
                 const title = document.createElement("strong");
-                title.textContent = `Giao dịch mượn #${borrow.id}`;
+                title.textContent = `${borrow.title || "Sách mượn"} · Phiếu #${borrow.id}`;
                 const status = document.createElement("span");
-                status.textContent = `${borrow.status} · trả dự kiến ${new Date(borrow.expected_return_at).toLocaleString("vi-VN")}`;
-                card.append(title, status);
+                const statusLabels = {
+                    PENDING: "Chờ người cho mượn xác nhận",
+                    CONFIRMED: "Đã xác nhận",
+                    READY_FOR_PICKUP: "Sẵn sàng nhận sách",
+                    ACTIVE: "Đang mượn",
+                    RETURN_REQUESTED: "Đang trả sách",
+                    RETURNED: "Đã giao đến người cho mượn · chờ xác nhận",
+                    COMPLETED: "Đã trả sách",
+                    REJECTED: "Đã từ chối",
+                    CANCELLED: "Đã hủy",
+                    OVERDUE: "Quá hạn",
+                    DISPUTED: "Đang xử lý tranh chấp",
+                };
+                status.className = `borrow-ticket__status borrow-ticket__status--${String(borrow.status).toLowerCase()}`;
+                status.textContent = statusLabels[borrow.status] || borrow.status;
+                const details = ticketDetails([
+                    ["Mã giao dịch", borrow.order_code || String(borrow.order_id || "")],
+                    ["Người cho mượn", borrow.lender_name],
+                    ["Người mượn", borrow.borrower_name],
+                    ["Ngày tạo", borrow.created_at
+                        ? new Date(borrow.created_at).toLocaleString("vi-VN")
+                        : ""],
+                    ["Phí mượn", money(borrow.rental_fee)],
+                    ["Tiền đặt cọc", money(borrow.deposit_amount)],
+                    ["Thời hạn tối đa", borrow.borrow_terms?.max_days
+                        ? `${borrow.borrow_terms.max_days} ngày`
+                        : ""],
+                    ["Bắt đầu", borrow.actual_start_at
+                        ? new Date(borrow.actual_start_at).toLocaleString("vi-VN")
+                        : borrow.expected_start_at
+                            ? new Date(borrow.expected_start_at).toLocaleString("vi-VN")
+                            : "Chưa bắt đầu"],
+                    ["Dự kiến trả", borrow.expected_return_at
+                        ? new Date(borrow.expected_return_at).toLocaleString("vi-VN")
+                        : ""],
+                    ["Đã trả", borrow.actual_return_at
+                        ? new Date(borrow.actual_return_at).toLocaleString("vi-VN")
+                        : "Chưa trả"],
+                    ["Trạng thái trả", borrow.return_status || "Chưa yêu cầu trả"],
+                    ["Cách trả", returnMethodLabel(
+                        borrow.return_method || borrow.borrow_terms?.return_method,
+                    )],
+                    ["Mã vận đơn trả", borrow.return_tracking_code],
+                    ["Ghi chú", borrow.return_notes],
+                ]);
+                card.append(title, status, details);
+                const actionGroup = document.createElement("div");
+                actionGroup.className = "borrow-ticket-card__actions";
+                let returnRequestForm = null;
                 borrowActionOptions(borrow).forEach(([action, label]) => {
                     const button = document.createElement("button");
-                    button.className = "button button-outline";
+                    button.className = action === "return" || action === "complete"
+                        ? "button button-primary"
+                        : "button button-outline";
                     button.type = "button";
                     button.textContent = label;
                     button.addEventListener("click", async () => {
+                        if (action === "request-return") {
+                            returnRequestForm.hidden = !returnRequestForm.hidden;
+                            return;
+                        }
                         button.disabled = true;
                         try {
-                            if (action === "request-return") {
-                                await OrdersAPI.requestBorrowReturn(borrow.id, {});
-                            } else {
-                                await OrdersAPI.borrowAction(borrow.id, action);
-                            }
+                            await OrdersAPI.borrowAction(borrow.id, action);
                             await loadBorrows();
                         } catch (error) {
                             showToast(error.message);
@@ -624,26 +844,173 @@ document.addEventListener("DOMContentLoaded", () => {
                             button.disabled = false;
                         }
                     });
-                    card.append(button);
+                    actionGroup.append(button);
                 });
+                if (actionGroup.childElementCount) card.append(actionGroup);
+                if (
+                    ["ACTIVE", "OVERDUE"].includes(borrow.status)
+                    && Number(borrow.borrower_id) === Number(currentUser.id)
+                ) {
+                    returnRequestForm = document.createElement("form");
+                    returnRequestForm.className = "borrow-return-form";
+                    returnRequestForm.hidden = true;
+                    const methodLabel = document.createElement("label");
+                    methodLabel.textContent = "Phương thức vận chuyển";
+                    const method = document.createElement("select");
+                    method.required = true;
+                    method.name = "return_method";
+                    const delivery = document.createElement("option");
+                    delivery.value = "DELIVERY";
+                    delivery.textContent = "Giao hàng về cho người cho mượn";
+                    method.append(delivery);
+                    methodLabel.append(method);
+                    const carrierLabel = document.createElement("label");
+                    carrierLabel.textContent = "Đơn vị vận chuyển";
+                    const carrier = document.createElement("input");
+                    carrier.required = true;
+                    carrier.maxLength = 100;
+                    carrier.autocomplete = "organization";
+                    carrier.placeholder = "Ví dụ: đơn vị giao hàng đã chọn";
+                    carrierLabel.append(carrier);
+                    const trackingLabel = document.createElement("label");
+                    trackingLabel.textContent = "Mã vận đơn";
+                    const trackingCode = document.createElement("input");
+                    trackingCode.required = true;
+                    trackingCode.maxLength = 100;
+                    trackingCode.autocomplete = "off";
+                    trackingLabel.append(trackingCode);
+                    const notesLabel = document.createElement("label");
+                    notesLabel.textContent = "Ghi chú (không bắt buộc)";
+                    const notes = document.createElement("textarea");
+                    notesLabel.append(notes);
+                    const submit = document.createElement("button");
+                    submit.className = "button button-primary";
+                    submit.type = "submit";
+                    submit.textContent = "Tạo yêu cầu trả và vận chuyển";
+                    returnRequestForm.append(
+                        methodLabel,
+                        carrierLabel,
+                        trackingLabel,
+                        notesLabel,
+                        submit,
+                    );
+                    returnRequestForm.addEventListener("submit", async (event) => {
+                        event.preventDefault();
+                        submit.disabled = true;
+                        try {
+                            await OrdersAPI.requestBorrowReturn(borrow.id, {
+                                return_method: method.value,
+                                carrier: carrier.value.trim(),
+                                return_tracking_code: trackingCode.value.trim(),
+                                return_notes: notes.value.trim(),
+                            });
+                            await loadBorrows();
+                        } catch (error) {
+                            showToast(error.message);
+                        } finally {
+                            submit.disabled = false;
+                        }
+                    });
+                    card.append(returnRequestForm);
+                }
+                if (borrow.return_shipment) {
+                    const shipment = borrow.return_shipment;
+                    const trackingSection = document.createElement("section");
+                    trackingSection.className = "shipment-summary";
+                    const shipmentTitle = document.createElement("strong");
+                    shipmentTitle.textContent = "Đơn trả sách · Người mượn → Người cho mượn";
+                    const shipmentInfo = document.createElement("p");
+                    shipmentInfo.textContent = [
+                        `Trạng thái: ${trackingLabel(shipment.status)}`,
+                        shipment.carrier,
+                        shipment.tracking_code ? `Mã vận đơn: ${shipment.tracking_code}` : "",
+                    ].filter(Boolean).join(" · ");
+                    trackingSection.append(shipmentTitle, shipmentInfo);
+                    (shipment.tracking || []).forEach((entry) => {
+                        const event = document.createElement("p");
+                        event.textContent = [
+                            trackingLabel(entry.status),
+                            entry.location,
+                            entry.description,
+                            entry.occurred_at
+                                ? new Date(entry.occurred_at).toLocaleString("vi-VN")
+                                : "",
+                        ].filter(Boolean).join(" · ");
+                        trackingSection.append(event);
+                    });
+                    if (
+                        Number(borrow.borrower_id) === Number(currentUser.id)
+                        && shipment.status !== "DELIVERED"
+                    ) {
+                        const nextTrackingStatus = {
+                            PENDING: "PICKED_UP",
+                            PICKED_UP: "IN_TRANSIT",
+                            IN_TRANSIT: "DELIVERED",
+                            OUT_FOR_DELIVERY: "DELIVERED",
+                        }[shipment.status];
+                        if (nextTrackingStatus) {
+                            const updateTracking = document.createElement("button");
+                            updateTracking.className = "button button-outline";
+                            updateTracking.type = "button";
+                            updateTracking.textContent = `Cập nhật vận chuyển: ${trackingLabel(nextTrackingStatus)}`;
+                            updateTracking.addEventListener("click", async () => {
+                                updateTracking.disabled = true;
+                                try {
+                                    await OrdersAPI.addShipmentTracking(shipment.id, {
+                                        status: nextTrackingStatus,
+                                    });
+                                    await loadBorrows();
+                                } catch (error) {
+                                    showToast(error.message);
+                                } finally {
+                                    updateTracking.disabled = false;
+                                }
+                            });
+                            trackingSection.append(updateTracking);
+                        }
+                    }
+                    card.append(trackingSection);
+                }
                 return card;
             });
-            if (!nodes.length) {
-                nodes.push(PassbookCommonComponents.emptyState("Chưa có giao dịch mượn."));
-            }
-            const controls = pagination(data, borrowPage, (value) => { borrowPage = value; }, loadBorrows);
+            const borrowResults = data.results || [];
+            const controls = borrowResults.length
+                ? pagination(data, borrowPage, (value) => { borrowPage = value; }, loadBorrows)
+                : null;
             if (controls) nodes.push(controls);
+            borrowsList.classList.toggle("report-list", borrowResults.length > 0);
             borrowsList.replaceChildren(...nodes);
+            focusRequestedTicket("borrow_id", "borrowId");
         } catch (error) {
             setMessage(borrowsList, error.message, "form-error");
         }
     };
 
-    page.querySelector("[data-workspace-refresh]").addEventListener("click", () => {
+    function focusRequestedTicket(queryName, dataName) {
+        const requestedId = new URLSearchParams(location.search).get(queryName);
+        if (!requestedId) return;
+        const attribute = dataName === "reservationId"
+            ? "[data-reservation-id]"
+            : "[data-borrow-id]";
+        const ticket = [...page.querySelectorAll(attribute)]
+            .find((item) => item.dataset[dataName] === requestedId);
+        if (ticket) {
+            ticket.classList.add("is-highlighted");
+            ticket.scrollIntoView({behavior: "smooth", block: "center"});
+        }
+    }
+
+    page.querySelector("[data-workspace-refresh]")?.addEventListener("click", () => {
         void Promise.all([loadCart(), loadOrders(), loadReservations(), loadBorrows()]);
     });
-    page.querySelector("[data-orders-refresh]").addEventListener("click", loadOrders);
-    page.querySelector("[data-reservations-refresh]").addEventListener("click", loadReservations);
-    page.querySelector("[data-borrows-refresh]").addEventListener("click", loadBorrows);
-    void Promise.all([loadCart(), loadOrders(), loadReservations(), loadBorrows()]);
+    page.querySelector("[data-orders-refresh]")?.addEventListener("click", loadOrders);
+    page.querySelector("[data-reservations-refresh]")?.addEventListener("click", loadReservations);
+    page.querySelector("[data-borrows-refresh]")?.addEventListener("click", loadBorrows);
+    if (workspaceView === "cart") {
+        void loadCart();
+    } else if (workspaceView === "borrows") {
+        void Promise.all([loadReservations(), loadBorrows()]);
+    } else {
+        void Promise.all([loadCart(), loadOrders(), loadReservations(), loadBorrows()]);
+    }
 });

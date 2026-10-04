@@ -4,6 +4,9 @@
     function cartItem(item, {onRemove, onBuy} = {}) {
         const card = document.createElement("article");
         card.className = "report-item";
+        card.dataset.cartItem = String(item.id);
+        card.dataset.listingId = String(item.listing_id);
+        card.dataset.listingType = item.listing_type || "";
         const cover = document.createElement("div");
         cover.className = "cart-item-cover";
         if (item.primary_image?.image_url) {
@@ -60,6 +63,7 @@
         buy.className = "button button-primary";
         buy.type = "button";
         buy.textContent = item.listing_type === "BORROW" ? "Đặt mượn" : "Mua";
+        buy.dataset.cartBuy = "";
         buy.addEventListener("click", onBuy || (() => {}));
         card.append(remove, buy);
         return card;

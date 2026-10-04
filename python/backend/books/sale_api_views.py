@@ -167,6 +167,13 @@ class SaleListingListCreateView(APIView):
         if category_id is not None:
             queryset = queryset.filter(
                 book__book_edition__book_work__category_id=category_id,
+                book__book_edition__book_work__category__status='ACTIVE',
+            )
+        category_slug = (params.get('category_slug') or '').strip()
+        if category_slug:
+            queryset = queryset.filter(
+                book__book_edition__book_work__category__slug=category_slug,
+                book__book_edition__book_work__category__status='ACTIVE',
             )
         publication_year = self._integer_param(params, 'publication_year')
         if publication_year is not None:

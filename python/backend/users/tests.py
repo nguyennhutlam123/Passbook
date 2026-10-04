@@ -115,6 +115,9 @@ class _OtpQuery:
         ]
         return matches[-1] if matches else None
 
+    def exists(self):
+        return self.first() is not None
+
 
 class _OtpManager:
     def __init__(self):
@@ -127,6 +130,10 @@ class _OtpManager:
         return _OtpQuery(self, filters)
 
     def create(self, **values):
+        values.setdefault(
+            'user_id',
+            getattr(values.get('user'), 'id', None),
+        )
         row = SimpleNamespace(id=len(self.rows) + 1, **values)
         row.save = lambda update_fields=None: None
         self.rows.append(row)
@@ -145,6 +152,67 @@ class OtpServiceTests(SimpleTestCase):
         )
         self.atomic_patch.start()
         self.addCleanup(self.atomic_patch.stop)
+
+    @override_settings(
+        OTP_LIFETIME_SECONDS=300,
+        OTP_MAX_ATTEMPTS=5,
+        OTP_RESEND_COOLDOWN_SECONDS=60,
+        OTP_MAX_RESENDS=5,
+    )
+    def test_phone_otp_send_verify_and_reuse_protection(self):
+        from .services.otp import (
+            OtpVerificationError,
+            issue_otp,
+            verify_otp,
+        )
+
+        user = SimpleNamespace(id=71, pk=71, phone='+15550007777')
+        delivered_codes = []
+        with patch(
+            'users.services.otp.User.objects.select_for_update',
+        ) as lock_user, patch(
+            'users.services.otp._deliver_otp',
+            side_effect=lambda *, target, channel, purpose, code: delivered_codes.append(code),
+        ):
+            lock_user.return_value.get.return_value = user
+            verification = issue_otp(
+                target=user.phone,
+                channel='PHONE',
+                purpose='CHANGE_PHONE',
+                user=user,
+            )
+
+        self.assertEqual(len(delivered_codes), 1)
+        self.assertEqual(verification.status, 'PENDING')
+        self.assertNotEqual(verification.otp_hash, delivered_codes[0])
+        verified = verify_otp(
+            target=user.phone,
+            purpose='CHANGE_PHONE',
+            code=delivered_codes[0],
+            user_id=user.id,
+        )
+        self.assertEqual(verified.status, 'VERIFIED')
+        with self.assertRaises(OtpVerificationError):
+            verify_otp(
+                target=user.phone,
+                purpose='CHANGE_PHONE',
+                code=delivered_codes[0],
+                user_id=user.id,
+            )
+        with self.assertRaises(OtpVerificationError):
+            verify_otp(
+                target=user.phone,
+                purpose='CHANGE_PHONE',
+                code=delivered_codes[0],
+                user_id=user.id + 1,
+            )
+        with self.assertRaises(OtpVerificationError):
+            verify_otp(
+                target='+15550009999',
+                purpose='CHANGE_PHONE',
+                code=delivered_codes[0],
+                user_id=user.id,
+            )
 
     @override_settings(
         OTP_LIFETIME_SECONDS=300,
@@ -351,6 +419,52 @@ class OtpServiceTests(SimpleTestCase):
 class OtpApiTests(SimpleTestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
+
+    def test_checkout_phone_otp_send_requires_authenticated_owner_and_hides_code(self):
+        from .otp_api_views import OtpRequestView
+
+        user = SimpleNamespace(
+            id=71,
+            pk=71,
+            is_authenticated=True,
+            phone='+15550007777',
+        )
+        request = self.factory.post('/api/auth/resend-otp/', {
+            'target': user.phone,
+            'purpose': 'CHANGE_PHONE',
+        }, format='json')
+        force_authenticate(request, user=user)
+        duplicate_check = SimpleNamespace(
+            exclude=lambda **kwargs: SimpleNamespace(exists=lambda: False),
+        )
+        with patch.object(
+            User.objects,
+            'filter',
+            return_value=duplicate_check,
+        ), patch(
+            'users.otp_api_views.issue_otp',
+        ) as issue:
+            response = OtpRequestView.as_view()(request)
+        self.assertEqual(response.status_code, 202)
+        self.assertNotIn('otp', response.data)
+        issue.assert_called_once_with(
+            target=user.phone,
+            channel='PHONE',
+            purpose='CHANGE_PHONE',
+            user=user,
+        )
+
+    def test_checkout_phone_otp_send_rejects_unauthenticated_request(self):
+        from .otp_api_views import OtpRequestView
+
+        request = self.factory.post('/api/auth/resend-otp/', {
+            'target': '+15550007777',
+            'purpose': 'CHANGE_PHONE',
+        }, format='json')
+        with patch('users.otp_api_views.issue_otp') as issue:
+            response = OtpRequestView.as_view()(request)
+        self.assertEqual(response.status_code, 401)
+        issue.assert_not_called()
 
     def test_register_verification_activates_pending_user_without_returning_code(self):
         verification = SimpleNamespace(user_id=42)

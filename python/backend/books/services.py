@@ -10,6 +10,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from notifications.models import Notification
+from notifications.services import notify_order_status_changed
 
 from .models import (
     Book,
@@ -19,6 +20,8 @@ from .models import (
     Order,
     Payment,
     Refund,
+    SaleOrderItem,
+    Shipment,
 )
 
 
@@ -111,11 +114,24 @@ def transition_fake_payment(payment_id, target_status):
     payment.updated_at = now
     fields = ['status', 'updated_at']
     if target_status == 'PAID':
+        previous_order_status = payment.order.status
         payment.paid_at = now
         fields.append('paid_at')
         payment.order.status = 'CONFIRMED'
         payment.order.updated_at = now
         payment.order.save(update_fields=['status', 'updated_at'])
+        for item in SaleOrderItem.objects.select_for_update().filter(
+            order=payment.order,
+        ).select_related('sale_listing', 'book'):
+            if item.sale_listing.status != 'ACTIVE' or item.book.status != 'AVAILABLE':
+                raise ValidationError('Sản phẩm không còn khả dụng để xác nhận thanh toán.')
+            item.sale_listing.status = 'SOLD'
+            item.sale_listing.updated_at = now
+            item.sale_listing.save(update_fields=['status', 'updated_at'])
+            item.book.status = 'SOLD'
+            item.book.updated_at = now
+            item.book.save(update_fields=['status', 'updated_at'])
+        notify_order_status_changed(payment.order, previous_order_status)
     payment.save(update_fields=fields)
     return payment
 
@@ -178,12 +194,15 @@ def calculate_payment_split(amount, fee_rate):
         raise ValidationError('Số tiền phải lớn hơn 0.')
     if fee_rate < 0 or fee_rate > 1:
         raise ValidationError('Tỷ lệ phí phải nằm trong khoảng 0 đến 1.')
-    fee = (amount * fee_rate).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    subtotal = amount
+    fee = (subtotal * fee_rate).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    seller_amount = (subtotal - fee).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
     return {
-        'amount': amount,
+        'subtotal': subtotal,
+        'amount': subtotal,
         'platform_fee_rate': fee_rate,
         'platform_fee': fee,
-        'seller_amount': amount - fee,
+        'seller_amount': seller_amount,
     }
 
 
@@ -198,6 +217,28 @@ def _notify(user_id, notification_type, title, content, entity_type, entity_id, 
         is_read=False,
         created_at=now,
     )
+
+
+def _release_borrow_inventory(
+    book,
+    lend_listing,
+    expected_book_status,
+    expected_listing_status,
+    now,
+):
+    can_release = book.status == expected_book_status
+    if can_release and lend_listing is not None and lend_listing.status == expected_listing_status:
+        lend_listing.status = (
+            'EXPIRED'
+            if lend_listing.expires_at is not None and lend_listing.expires_at <= now
+            else 'ACTIVE'
+        )
+        lend_listing.updated_at = now
+        lend_listing.save(update_fields=['status', 'updated_at'])
+    if can_release:
+        book.status = 'AVAILABLE'
+        book.updated_at = now
+        book.save(update_fields=['status', 'updated_at'])
 
 
 @transaction.atomic
@@ -249,18 +290,23 @@ def transition_reservation(reservation_id, actor, action):
         reservation.status = 'EXPIRED'
         reservation.updated_at = now
         reservation.save(update_fields=['status', 'updated_at'])
-        reservation.book.sale_listings.filter(status='RESERVED').update(
-            status='ACTIVE',
-            updated_at=now,
-        )
-        if reservation.book.status == 'RESERVED':
-            reservation.book.status = 'AVAILABLE'
-            reservation.book.updated_at = now
-            reservation.book.save(update_fields=['status', 'updated_at'])
-        if is_borrow and lend_listing.status == 'RESERVED':
-            lend_listing.status = 'ACTIVE'
-            lend_listing.updated_at = now
-            lend_listing.save(update_fields=['status', 'updated_at'])
+        if is_borrow:
+            _release_borrow_inventory(
+                reservation.book,
+                lend_listing,
+                'RESERVED',
+                'RESERVED',
+                now,
+            )
+        else:
+            reservation.book.sale_listings.filter(status='RESERVED').update(
+                status='ACTIVE',
+                updated_at=now,
+            )
+            if reservation.book.status == 'RESERVED':
+                reservation.book.status = 'AVAILABLE'
+                reservation.book.updated_at = now
+                reservation.book.save(update_fields=['status', 'updated_at'])
 
     if action in ('confirm', 'reject'):
         if reservation.status != 'PENDING':
@@ -306,18 +352,24 @@ def transition_reservation(reservation_id, actor, action):
     reservation.updated_at = now
     reservation.save(update_fields=['status', 'updated_at'])
     if reservation.status in ('CANCELLED', 'REJECTED', 'COMPLETED'):
-        reservation.book.sale_listings.filter(status='RESERVED').update(
-            status='ACTIVE',
-            updated_at=now,
-        )
-        if reservation.book.status in ('RESERVED', 'ON_LOAN'):
-            reservation.book.status = 'AVAILABLE'
-            reservation.book.updated_at = now
-            reservation.book.save(update_fields=['status', 'updated_at'])
-        if is_borrow and lend_listing.status in ('RESERVED', 'ON_LOAN'):
-            lend_listing.status = 'ACTIVE'
-            lend_listing.updated_at = now
-            lend_listing.save(update_fields=['status', 'updated_at'])
+        if is_borrow:
+            expected_status = 'ON_LOAN' if reservation.status == 'COMPLETED' else 'RESERVED'
+            _release_borrow_inventory(
+                reservation.book,
+                lend_listing,
+                expected_status,
+                expected_status,
+                now,
+            )
+        else:
+            reservation.book.sale_listings.filter(status='RESERVED').update(
+                status='ACTIVE',
+                updated_at=now,
+            )
+            if reservation.book.status in ('RESERVED', 'ON_LOAN'):
+                reservation.book.status = 'AVAILABLE'
+                reservation.book.updated_at = now
+                reservation.book.save(update_fields=['status', 'updated_at'])
     _notify(
         recipient_id,
         'BOOK_RESERVATION',
@@ -379,56 +431,39 @@ def transition_borrow_order(borrow_order_id, actor, action):
         borrow_order.lend_listing.book.save(update_fields=['status', 'updated_at'])
         borrow_order.lend_listing.save(update_fields=['status', 'updated_at'])
         recipient_id = borrow_order.lender_id
-    elif action == 'request_return':
-        if actor.id not in (borrow_order.borrower_id, borrow_order.lender_id):
-            raise PermissionDenied('Bạn không tham gia yêu cầu mượn sách này.')
-        if borrow_order.status not in ('ACTIVE', 'OVERDUE'):
-            raise ValidationError('Chỉ sách đang được mượn mới có thể yêu cầu trả.')
-        borrow_order.status = 'RETURN_REQUESTED'
-        borrow_order.return_status = 'REQUESTED'
-        borrow_order.return_requested_by = actor
-        borrow_order.return_requested_at = now
-        recipient_id = (
-            borrow_order.lender_id
-            if actor.id == borrow_order.borrower_id
-            else borrow_order.borrower_id
-        )
-    elif action == 'return':
-        if actor.id not in (borrow_order.borrower_id, borrow_order.lender_id):
-            raise PermissionDenied('Bạn không tham gia yêu cầu mượn sách này.')
-        if borrow_order.status != 'RETURN_REQUESTED':
-            raise ValidationError('Sách chưa có yêu cầu trả đang chờ.')
-        if actor.id == getattr(borrow_order.return_requested_by, 'id', None):
-            raise PermissionDenied('Bên còn lại cần xác nhận đã nhận lại sách.')
-        borrow_order.status = 'RETURNED'
+    elif action == 'complete':
+        if actor.id != borrow_order.lender_id:
+            raise PermissionDenied('Chỉ người cho mượn mới có thể xác nhận đã nhận sách.')
+        if borrow_order.status != 'RETURNED' or borrow_order.return_status != 'DELIVERED':
+            raise ValidationError(
+                'Chỉ có thể hoàn tất sau khi vận chuyển trả được giao đến người cho mượn.',
+            )
+        if not Shipment.objects.filter(
+            order_id=borrow_order.order_id,
+            tracking_code=borrow_order.return_tracking_code,
+            status='DELIVERED',
+        ).exists():
+            raise ValidationError('Chưa tìm thấy vận chuyển trả đã giao thành công.')
+        borrow_order.status = 'COMPLETED'
         borrow_order.return_status = 'COMPLETED'
         borrow_order.return_approved_at = now
         borrow_order.actual_return_at = now
-        borrow_order.lend_listing.status = 'ACTIVE'
-        borrow_order.lend_listing.updated_at = now
-        borrow_order.lend_listing.book.status = 'AVAILABLE'
-        borrow_order.lend_listing.book.updated_at = now
-        borrow_order.lend_listing.book.save(update_fields=['status', 'updated_at'])
-        borrow_order.lend_listing.save(update_fields=['status', 'updated_at'])
-        recipient_id = (
-            borrow_order.lender_id
-            if actor.id == borrow_order.borrower_id
-            else borrow_order.borrower_id
-        )
-    elif action == 'complete':
-        if actor.id not in (borrow_order.borrower_id, borrow_order.lender_id):
-            raise PermissionDenied('Bạn không tham gia yêu cầu mượn sách này.')
-        _require_borrow_status(borrow_order, 'RETURNED')
-        borrow_order.status = 'COMPLETED'
         borrow_order.order.status = 'COMPLETED'
         borrow_order.order.completed_at = now
         borrow_order.order.updated_at = now
         borrow_order.order.save(update_fields=['status', 'completed_at', 'updated_at'])
-        recipient_id = (
-            borrow_order.lender_id
-            if actor.id == borrow_order.borrower_id
-            else borrow_order.borrower_id
+        listing = borrow_order.lend_listing
+        listing.status = (
+            'EXPIRED'
+            if listing.expires_at is not None and listing.expires_at <= now
+            else 'ACTIVE'
         )
+        listing.updated_at = now
+        listing.save(update_fields=['status', 'updated_at'])
+        listing.book.status = 'AVAILABLE'
+        listing.book.updated_at = now
+        listing.book.save(update_fields=['status', 'updated_at'])
+        recipient_id = borrow_order.borrower_id
     elif action == 'cancel':
         if actor.id != borrow_order.borrower_id:
             raise PermissionDenied('Chỉ người mượn mới được hủy yêu cầu.')

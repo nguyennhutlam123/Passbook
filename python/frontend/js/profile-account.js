@@ -5,23 +5,103 @@ document.addEventListener("DOMContentLoaded", () => {
     const passwordForm = page.querySelector("[data-password-form]");
     const addressForm = page.querySelector("[data-address-form]");
     const addressList = page.querySelector("[data-address-list]");
+    const avatarInput = profileForm.elements.avatar_file;
+    const avatarMessage = page.querySelector("[data-avatar-message]");
+    let selectedAvatarFile = null;
+    let selectedAvatarPreviewUrl = null;
+    let savedAvatarUrl = null;
     let addressPage = 1;
+
+    const renderAvatar = (container, name, imageUrl) => {
+        container.replaceChildren();
+        if (imageUrl) {
+            const image = document.createElement("img");
+            image.src = imageUrl;
+            image.alt = "";
+            image.addEventListener("error", () => {
+                container.textContent = (name || "NG").slice(0, 2).toUpperCase();
+            }, {once: true});
+            container.append(image);
+        } else {
+            container.textContent = (name || "NG").slice(0, 2).toUpperCase();
+        }
+    };
+
+    const setAvatarPreview = (imageUrl, name) => {
+        renderAvatar(page.querySelector("[data-profile-avatar]"), name, imageUrl);
+        renderAvatar(page.querySelector("[data-avatar-picker-preview]"), name, imageUrl);
+    };
 
     const loadProfile = async () => {
         try {
-            const profile = await AuthAPI.profile();
+            let profile = {};
+            const demoMode = new URL(window.location.href).searchParams.get("demo") === "1";
+            if (demoMode || globalThis.localStorage.getItem("demoProfile") === "true") {
+                profile = {
+                    id: "demo-profile",
+                    name: "Nguyễn Lâm",
+                    email: "lam.passbook@gmail.com",
+                    university: {name: "HCMUE"},
+                    avatar: "",
+                    bio: "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.",
+                    is_verified: true,
+                };
+                globalThis.localStorage.setItem("demoProfile", "true");
+            } else {
+                profile = await AuthAPI.profile();
+            }
+            const profileName = profile.name || "Người dùng mới";
             profileForm.elements.name.value = profile.name || "";
-            profileForm.elements.avatar.value = profile.avatar || "";
-            page.querySelector("[data-profile-name]").firstChild.textContent = `${profile.name || "Người dùng"} `;
-            page.querySelector("[data-profile-school]").textContent = profile.university?.name || profile.email || "";
-            page.querySelector("[data-profile-student-id]").textContent = profile.email || "—";
-            page.querySelector(".profile-avatar").textContent =
-                (profile.name || "NG").slice(0, 2).toUpperCase();
+            savedAvatarUrl = profile.avatar || null;
+            page.querySelector("[data-profile-name]").textContent = profileName;
+            page.querySelector("[data-profile-school]").textContent = profile.university?.name || "Chưa cập nhật trường học";
+            page.querySelector("[data-profile-email]").textContent = profile.email || "Chưa cập nhật email";
+            const bioElement = page.querySelector("[data-profile-bio]");
+            if (bioElement) {
+                bioElement.textContent = profile.bio || "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.";
+            }
+            if (!selectedAvatarFile) setAvatarPreview(savedAvatarUrl, profileName);
             PassbookAuth.updateUser({...PassbookAuth.getCurrentUser(), ...profile});
         } catch (error) {
             showToast(error.message);
         }
     };
+
+    avatarInput.addEventListener("change", () => {
+        const file = avatarInput.files?.[0] || null;
+        avatarMessage.textContent = "";
+        avatarMessage.classList.remove("is-error");
+        if (selectedAvatarPreviewUrl) {
+            URL.revokeObjectURL(selectedAvatarPreviewUrl);
+            selectedAvatarPreviewUrl = null;
+        }
+        if (!file) {
+            selectedAvatarFile = null;
+            setAvatarPreview(savedAvatarUrl, profileForm.elements.name.value);
+            return;
+        }
+        const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+        if (!allowedTypes.includes(file.type)) {
+            avatarInput.value = "";
+            selectedAvatarFile = null;
+            setAvatarPreview(savedAvatarUrl, profileForm.elements.name.value);
+            avatarMessage.textContent = "Vui lòng chọn ảnh JPG, PNG, WebP hoặc GIF.";
+            avatarMessage.classList.add("is-error");
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            avatarInput.value = "";
+            selectedAvatarFile = null;
+            setAvatarPreview(savedAvatarUrl, profileForm.elements.name.value);
+            avatarMessage.textContent = "Ảnh đại diện phải có dung lượng tối đa 10 MB.";
+            avatarMessage.classList.add("is-error");
+            return;
+        }
+        selectedAvatarFile = file;
+        selectedAvatarPreviewUrl = URL.createObjectURL(file);
+        setAvatarPreview(selectedAvatarPreviewUrl, profileForm.elements.name.value);
+        avatarMessage.textContent = file.name;
+    });
 
     const loadAddresses = async () => {
         try {
@@ -65,17 +145,34 @@ document.addEventListener("DOMContentLoaded", () => {
                 card.append(details, edit, remove);
                 return card;
             });
-            const controls = Array.isArray(data) ? null : PassbookCommonComponents.pagination({
-                previous: data.previous,
-                next: data.next,
-                onPrevious: () => { addressPage = Math.max(1, addressPage - 1); void loadAddresses(); },
-                onNext: () => { addressPage += 1; void loadAddresses(); },
-            });
-            if (!nodes.length) nodes.push(PassbookCommonComponents.emptyState("Chưa lưu địa chỉ giao hàng."));
+            const controls = !addresses.length || Array.isArray(data)
+                ? null
+                : PassbookCommonComponents.pagination({
+                    previous: data.previous,
+                    next: data.next,
+                    onPrevious: () => {
+                        addressPage = Math.max(1, addressPage - 1);
+                        void loadAddresses();
+                    },
+                    onNext: () => {
+                        addressPage += 1;
+                        void loadAddresses();
+                    },
+                });
             if (controls) nodes.push(controls);
+            addressList.classList.toggle("report-list", addresses.length > 0);
+            page.querySelector("[data-address-grid]").classList.toggle(
+                "has-addresses",
+                addresses.length > 0,
+            );
             addressList.replaceChildren(...nodes);
         } catch (error) {
-            addressList.replaceChildren(PassbookCommonComponents.emptyState(error.message));
+            addressList.classList.remove("report-list");
+            page.querySelector("[data-address-grid]").classList.remove("has-addresses");
+            const message = document.createElement("p");
+            message.className = "form-error";
+            message.textContent = error.message;
+            addressList.replaceChildren(message);
         }
     };
 
@@ -83,18 +180,42 @@ document.addEventListener("DOMContentLoaded", () => {
         event.preventDefault();
         const submit = profileForm.querySelector("button[type=submit]");
         submit.disabled = true;
+        let uploadedAvatar = null;
         try {
-            const profile = await AuthAPI.updateProfile({
-                name: profileForm.elements.name.value.trim(),
-                avatar: profileForm.elements.avatar.value.trim() || null,
-            });
+            if (selectedAvatarFile) {
+                submit.textContent = "Đang tải ảnh...";
+                uploadedAvatar = await BooksAPI.uploadCloudinary(selectedAvatarFile);
+            }
+            submit.textContent = "Đang lưu...";
+            const payload = {name: profileForm.elements.name.value.trim()};
+            if (uploadedAvatar) payload.avatar = uploadedAvatar.image_url;
+            const profile = await AuthAPI.updateProfile(payload);
             PassbookAuth.updateUser({...PassbookAuth.getCurrentUser(), ...profile});
+            savedAvatarUrl = profile.avatar || null;
+            selectedAvatarFile = null;
+            avatarInput.value = "";
+            if (selectedAvatarPreviewUrl) {
+                URL.revokeObjectURL(selectedAvatarPreviewUrl);
+                selectedAvatarPreviewUrl = null;
+            }
+            avatarMessage.textContent = "";
             await loadProfile();
             showToast("Đã cập nhật hồ sơ.");
         } catch (error) {
+            if (uploadedAvatar?.cloudinary_public_id) {
+                try {
+                    await BooksAPI.cleanupCloudinary([uploadedAvatar.cloudinary_public_id]);
+                } catch (cleanupError) {
+                    showToast(
+                        `${error.message} Ảnh tải lên chưa được dọn khỏi Cloudinary: ${cleanupError.message}`,
+                    );
+                    return;
+                }
+            }
             showToast(error.message);
         } finally {
             submit.disabled = false;
+            submit.textContent = "Lưu thay đổi";
         }
     });
 

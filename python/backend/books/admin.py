@@ -3,6 +3,7 @@ from django.contrib import messages
 from django.utils import timezone
 
 from config.composite_admin import CompositeKeyAdmin
+from notifications.services import notify_order_status_changed
 
 from .models import (
     Book,
@@ -50,7 +51,6 @@ admin.site.register((
     Cart,
     CartItem,
     CheckoutGroup,
-    Order,
     SaleOrderItem,
     BorrowOrder,
     Payment,
@@ -61,6 +61,24 @@ admin.site.register((
     Review,
     Favorite,
 ))
+
+
+@admin.register(Order)
+class OrderAdmin(admin.ModelAdmin):
+    list_display = ('id', 'order_code', 'order_type', 'buyer', 'seller', 'status', 'created_at')
+    list_filter = ('order_type', 'status', 'created_at')
+    search_fields = ('order_code', 'buyer__email', 'seller__email')
+
+    def save_model(self, request, obj, form, change):
+        previous_status = None
+        if change:
+            previous_status = Order.objects.filter(pk=obj.pk).values_list(
+                'status',
+                flat=True,
+            ).first()
+        super().save_model(request, obj, form, change)
+        if previous_status is not None:
+            notify_order_status_changed(obj, previous_status)
 
 
 @admin.register(SaleListing)

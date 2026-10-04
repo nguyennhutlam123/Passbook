@@ -669,6 +669,8 @@ CREATE TABLE `shipment_tracking` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `shipment_id` BIGINT UNSIGNED NOT NULL,
   `status` VARCHAR(30) NOT NULL,
+  `source` VARCHAR(30) NOT NULL DEFAULT 'LEGACY',
+  `changed_by_id` BIGINT NULL DEFAULT NULL,
   `location` VARCHAR(255) NULL DEFAULT NULL,
   `description` TEXT NULL DEFAULT NULL,
   `occurred_at` DATETIME(3) NOT NULL,

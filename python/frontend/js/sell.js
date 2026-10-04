@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const maximumImages = 10;
     const imageEntries = [];
     let editing = null;
+    let originalImages = [];
     let imagesReady = Promise.resolve();
 
     try {
@@ -135,6 +136,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 : null,
             condition: editing.condition_status,
             edition: editing.edition,
+            author: editing.author,
+            publisher: editing.publisher,
+            isbn: editing.isbn,
+            condition_description: editing.condition_description,
             publication_year: editing.publication_year,
             subject_id: editing.subject?.id,
             category_id: editing.category?.id,
@@ -144,6 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
         imagesReady = BooksAPI.images(editing.id).then((response) => {
+            originalImages = response.images;
             response.images.forEach((image) => imageEntries.push({
                 ...image,
                 kind: "existing",
@@ -233,7 +239,12 @@ document.addEventListener("DOMContentLoaded", () => {
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (submitButton.disabled) return;
-        await imagesReady;
+        try {
+            await imagesReady;
+        } catch (error) {
+            showToast(`Không thể tải ảnh hiện tại: ${error.message}`);
+            return;
+        }
 
         const data = new FormData(form);
         [
@@ -242,7 +253,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ].forEach((field) => setError(field));
         const errors = {};
         const selectedType = transactionType();
-        if (!data.get("title")?.toString().trim()) errors.title = "Tên giáo trình không được để trống.";
+        if (!data.get("title")?.toString().trim()) errors.title = "Tên sách không được để trống.";
         if (!Number(data.get("subject_id"))) errors.subject_id = "Vui lòng chọn môn học.";
         if (selectedType === "BUY" && (!Number(data.get("price")) || Number(data.get("price")) <= 0)) {
             errors.price = "Giá bán phải lớn hơn 0.";
@@ -274,6 +285,10 @@ document.addEventListener("DOMContentLoaded", () => {
             description: data.get("description").toString().trim(),
             condition_status: data.get("condition"),
             edition: data.get("edition") || null,
+            author: data.get("author")?.toString().trim() || null,
+            publisher: data.get("publisher")?.toString().trim() || null,
+            isbn: data.get("isbn")?.toString().trim() || null,
+            condition_description: data.get("condition_description")?.toString().trim() || null,
             publication_year: data.get("publication_year") ? Number(data.get("publication_year")) : null,
             subject_id: Number(data.get("subject_id")),
             category_id: data.get("category_id") ? Number(data.get("category_id")) : null,
@@ -323,7 +338,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     imageEntries.filter((entry) => entry.kind === "existing")
                         .map((entry) => entry.id),
                 );
-                const deletedCloudinaryIds = (editing.images || [])
+                const deletedCloudinaryIds = originalImages
                     .filter((image) => !retainedIds.has(image.id))
                     .map((image) => image.cloudinary_public_id)
                     .filter((publicId) => publicId
@@ -338,6 +353,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             localStorage.removeItem("editingListing");
+            const detailLink = document.querySelector("[data-sell-detail-link]");
+            if (detailLink) {
+                detailLink.href = book.listing_type === "BORROW"
+                    ? `book-detail.html?id=${book.id}&listing_type=borrow&listing_id=${book.listing_id}`
+                    : `book-detail.html?id=${book.id}`;
+            }
             form.hidden = true;
             success.hidden = false;
             showToast(editing ? "Đã cập nhật tin đăng." : "Đăng tin thành công.");
@@ -370,6 +391,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         imageEntries.length = 0;
         editing = null;
+        originalImages = [];
         imagesReady = Promise.resolve();
         localStorage.removeItem("editingListing");
         form.reset();

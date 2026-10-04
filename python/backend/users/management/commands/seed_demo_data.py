@@ -18,6 +18,7 @@ from books.models import (
     Favorite,
     SaleListing,
 )
+from books.category_taxonomy import BOOK_CATEGORIES
 from messaging.models import Conversation, ConversationMember, Message
 from notifications.models import Notification
 from reports.models import Report
@@ -138,14 +139,7 @@ class Command(BaseCommand):
         return result
 
     def _categories(self, now):
-        data = [
-            ('Giáo trình đại cương', 'Toán, lý, hóa và các môn nền tảng'),
-            ('Công nghệ thông tin', 'Lập trình, dữ liệu và hệ thống'),
-            ('Kỹ thuật', 'Cơ khí, điện và kỹ thuật ứng dụng'),
-            ('Kinh tế - Quản trị', 'Kinh tế, tài chính và quản trị'),
-            ('Ngoại ngữ', 'Tiếng Anh chuyên ngành và giao tiếp'),
-            ('Kỹ năng học tập', 'Phương pháp học và tài liệu tham khảo'),
-        ]
+        data = [(name, description) for _slug, name, description in BOOK_CATEGORIES]
         return [
             self._get_or_create(
                 Category,

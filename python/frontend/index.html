@@ -34,24 +34,33 @@
 
         <section class="page-shell catalog-navigation" aria-labelledby="catalog-navigation-title">
             <div class="section-heading section-heading--catalog">
-                <div><span class="eyebrow">Danh mục</span><h2 id="catalog-navigation-title">Duyệt theo môn học</h2></div>
+                <div><span class="eyebrow">Danh mục</span><h2 id="catalog-navigation-title">Duyệt theo danh mục</h2></div>
                 <a class="text-link" href="books.html">Tất cả sách <span>→</span></a>
             </div>
             <nav class="catalog-tabs" aria-label="Danh mục sách">
                 <a class="catalog-tab is-active" href="books.html">Tất cả</a>
-                <a class="catalog-tab" href="books.html?q=Công%20nghệ%20thông%20tin">Công nghệ thông tin</a>
-                <a class="catalog-tab" href="books.html?q=Vật%20lý">Vật lý</a>
-                <a class="catalog-tab" href="books.html?q=Toán">Toán học</a>
-                <a class="catalog-tab" href="books.html?q=Hóa%20học">Hóa học</a>
-                <a class="catalog-tab" href="books.html?q=Ngoại%20ngữ">Ngoại ngữ</a>
-                <a class="catalog-tab" href="books.html?q=Giáo%20trình">Giáo trình</a>
+                <a class="catalog-tab" href="books.html?category_slug=tieu-thuyet">Tiểu thuyết</a>
+                <a class="catalog-tab" href="books.html?category_slug=tho">Thơ</a>
+                <a class="catalog-tab" href="books.html?category_slug=kich">Kịch</a>
+                <a class="catalog-tab" href="books.html?category_slug=sach-giao-khoa">Sách giáo khoa</a>
+                <a class="catalog-tab" href="books.html?category_slug=giao-trinh">Giáo trình</a>
+                <a class="catalog-tab" href="books.html?category_slug=tai-lieu">Tài liệu</a>
+                <a class="catalog-tab" href="books.html?category_slug=truyen-tranh">Truyện tranh</a>
             </nav>
+        </section>
+
+        <section class="page-shell collection-section collection-section--borrow" aria-labelledby="home-borrow-title">
+            <div class="collection-heading">
+                <div><span class="eyebrow">Mượn linh hoạt</span><h2 id="home-borrow-title">Mượn sách</h2><p>Sách cho mượn đang khả dụng từ cộng đồng sinh viên.</p></div>
+                <a class="text-link" href="borrow.html">Khám phá sách mượn <span>→</span></a>
+            </div>
+            <div class="book-grid book-grid--storefront" data-home-borrow aria-live="polite"></div>
         </section>
 
         <div class="storefront-content" data-home-content>
             <section class="page-shell collection-section collection-section--new" aria-labelledby="new-books-title">
                 <div class="collection-heading">
-                    <div><span class="eyebrow">Vừa lên kệ</span><h2 id="new-books-title">Sách mới đăng</h2><p>Những giáo trình vừa được sinh viên đăng bán.</p></div>
+                    <div><span class="eyebrow">Vừa lên kệ</span><h2 id="new-books-title">Mua sách mới đăng</h2><p>Những giáo trình vừa được sinh viên đăng bán.</p></div>
                     <a class="text-link" href="books.html?sort=newest">Xem tất cả <span>→</span></a>
                 </div>
                 <div class="book-grid book-grid--storefront" data-new-books></div>

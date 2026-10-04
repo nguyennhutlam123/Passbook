@@ -28,7 +28,7 @@
             .join(" · ");
         const statusLabels = {
             sold: "Đã bán",
-            reserved: "Đã giữ",
+            reserved: "Có yêu cầu đang xử lý",
             on_loan: "Đang cho mượn",
             hidden: "Đã ẩn",
             deleted: "Đã xóa",
@@ -50,7 +50,11 @@
             ? ""
             : `<button class="favorite-button ${favorite ? "is-favorite" : ""}" type="button" data-favorite="${id}" aria-label="${favorite ? "Bỏ lưu" : "Lưu"} ${title}" aria-pressed="${pressed}">${favorite ? "♥" : "♡"}</button>`;
         const borrowAction = book.listing_type === "BORROW"
-            ? `<button class="button button-primary" type="button" data-borrow-request="${escape(book.listing_id)}" data-book-id="${id}" data-title="${title}">Đăng ký mượn</button>`
+            && Number(book.seller?.id) !== Number(global.PassbookAuth?.getCurrentUser()?.id)
+            ? `<button class="button button-primary" type="button" data-borrow-request="${escape(book.listing_id)}" data-book-id="${id}" data-title="${title}">Đặt mượn sách</button>`
+            : "";
+        const borrowTerms = book.listing_type === "BORROW"
+            ? `<p class="book-card__subject">${book.borrow_terms?.max_days ? `Tối đa ${escape(book.borrow_terms.max_days)} ngày` : "Thời hạn theo thỏa thuận"}${Number(book.deposit_amount) > 0 ? ` · Cọc ${global.formatPrice(Number(book.deposit_amount))}` : ""}</p>`
             : "";
         const intentCounts = book.listing_type === "BORROW"
             ? ""
@@ -69,6 +73,7 @@
                 <p class="book-card__subject">${subject}${code ? ` · ${code}` : ""}</p>
                 ${editionInfo ? `<p class="book-card__subject">${editionInfo}</p>` : ""}
                 <strong class="price">${book.listing_type === "BORROW" ? "Phí mượn · " : ""}${global.formatPrice(Number(book.price) || 0)}</strong>
+                ${borrowTerms}
                 ${intentCounts}
                 <div class="seller-line"><span>${seller}</span></div>
                 ${borrowAction}

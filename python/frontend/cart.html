@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giỏ hàng - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell workspace-page" data-workspace-page data-workspace-view="cart">
+        <section class="section-heading">
+            <div><span class="eyebrow">Giao dịch</span><h1>Giỏ hàng</h1></div>
+            <a class="button button-outline" href="orders.html">Đơn hàng</a>
+        </section>
+        <section class="workspace-section" aria-labelledby="cart-title">
+            <div class="report-list" data-cart-items><p class="loading-state">Đang tải giỏ hàng...</p></div>
+            <p class="workspace-total" data-cart-total></p>
+            <form class="workspace-checkout" data-checkout-form hidden>
+                <h2>Thông tin đặt hàng</h2>
+                <div data-checkout-summary><p class="loading-state">Đang tính tiền từ server...</p></div>
+                <div class="form-group"><label class="form-label" for="checkout-recipient">Người nhận</label><input class="form-control" id="checkout-recipient" name="recipient_name" required maxlength="255"></div>
+                <div class="form-group"><label class="form-label" for="checkout-phone">Số điện thoại</label><input class="form-control" id="checkout-phone" name="phone" required maxlength="30"></div>
+                <div class="form-group"><label class="form-label" for="checkout-address">Địa chỉ</label><input class="form-control" id="checkout-address" name="address_line" required maxlength="500"></div>
+                <div class="form-group"><label class="form-label" for="checkout-city">Tỉnh / thành phố</label><input class="form-control" id="checkout-city" name="city" required maxlength="255"></div>
+                <div class="form-group"><label class="form-label" for="checkout-payment-method">Phương thức thanh toán</label><select class="form-control" id="checkout-payment-method" name="payment_method"><option value="FAKE">Online · Fake Payment Provider (local/test)</option><option value="COD">Thanh toán khi nhận hàng (COD)</option><option value="BANK_TRANSFER">Chuyển khoản ngân hàng</option></select></div>
+                <div class="form-group" data-fake-payment-options>
+                    <label class="form-label" for="checkout-payment-outcome">Kết quả Fake Payment (local/test)</label>
+                    <select class="form-control" id="checkout-payment-outcome" name="payment_outcome"><option value="SUCCESS">Thành công</option><option value="FAILURE">Thất bại</option><option value="CANCEL">Hủy</option></select>
+                </div>
+                <p class="caption" data-bank-transfer-note hidden>Chuyển khoản sẽ ở trạng thái chờ Admin xác minh. Chưa có cấu hình ngân hàng được cung cấp; không hiển thị thông tin tài khoản giả.</p>
+                <p class="caption" data-cod-note hidden>COD chưa có bước xác nhận thu tiền. Payment sẽ giữ trạng thái chưa thanh toán cho tới khi chức năng này được triển khai.</p>
+                <div class="modal-actions"><button class="button button-outline" type="button" data-checkout-cancel>Hủy</button><button class="button button-primary" type="submit">Đặt hàng</button></div>
+            </form>
+            <div class="success-panel" data-checkout-success hidden></div>
+            <p class="form-error" role="alert" data-cart-error></p>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script><script src="js/core/errors.js"></script><script src="js/core/auth.js"></script><script src="js/core/router.js"></script><script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script><script src="js/components/books/book-card.js"></script><script src="js/components/commerce/cards.js"></script><script src="js/components/messaging/cards.js"></script>
+    <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/users-api.js"></script><script src="js/api/books-api.js"></script><script src="js/api/favorites-api.js"></script><script src="js/api/reservations-api.js"></script><script src="js/api/orders-api.js"></script><script src="js/api/payments-api.js"></script><script src="js/api/shipping-api.js"></script><script src="js/api/returns-api.js"></script><script src="js/api/messaging-api.js"></script><script src="js/api/notifications-api.js"></script><script src="js/api/reports-api.js"></script><script src="js/api/admin-api.js"></script>
+    <script src="js/main.js"></script><script src="js/workspace.js"></script>
+</body>
+</html>

@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tìm giáo trình - PassBook</title>
+    <title>Tìm sách - PassBook</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
     <main class="page-shell catalog-page">
         <div class="catalog-search">
-            <label class="sr-only" for="catalog-query">Tìm giáo trình</label>
+            <label class="sr-only" for="catalog-query">Tìm sách</label>
             <input id="catalog-query" type="search" placeholder="Tìm tên sách, môn học, mã môn hoặc mã ISBN..." autocomplete="off">
             <button class="button button-primary" type="button" data-search-submit>🔍 Tìm kiếm</button>
         </div>
         <div class="catalog-layout">
-            <aside class="filter-panel" aria-label="Bộ lọc giáo trình">
+            <aside class="filter-panel" aria-label="Bộ lọc sách">
                 <div class="filter-heading">
-                    <h1>Tìm giáo trình</h1>
+                    <h2>Bộ lọc</h2>
                     <button class="button button-outline filter-close" type="button" data-filter-close>Đóng</button>
                 </div>
                 <div class="form-group">
@@ -75,6 +75,14 @@
                     <label class="form-label" for="filter-max-price">Giá tối đa</label>
                     <input id="filter-max-price" type="number" min="0" step="1000" placeholder="Không giới hạn">
                 </div>
+                <label class="sort-control">Sắp xếp
+                    <select id="sort-books">
+                        <option value="newest">Mới nhất</option>
+                        <option value="oldest">Cũ nhất</option>
+                        <option value="price-asc">Giá thấp → cao</option>
+                        <option value="price-desc">Giá cao → thấp</option>
+                    </select>
+                </label>
                 <button class="button button-primary" type="button" data-apply-filters>Lọc</button>
                 <p class="caption">Kết quả chỉ gồm tin đăng bán đang hoạt động.</p>
                 <button class="button button-outline" type="button" data-reset-filters>Xóa bộ lọc</button>
@@ -82,17 +90,9 @@
             <section class="catalog-results" aria-live="polite">
                 <div class="results-toolbar">
                     <div>
-                        <button class="button button-outline filter-open" type="button" data-filter-open>Bộ lọc</button>
-                        <p class="caption" data-result-count>Đang tải giáo trình...</p>
+                        <button class="button button-outline filter-open" type="button" data-filter-open aria-expanded="false">Bộ lọc <span aria-hidden="true">⌄</span></button>
+                        <p class="caption" data-result-count>Đang tải sách...</p>
                     </div>
-                    <label class="sort-control">Sắp xếp
-                        <select id="sort-books">
-                            <option value="newest">Mới nhất</option>
-                            <option value="oldest">Cũ nhất</option>
-                            <option value="price-asc">Giá thấp → cao</option>
-                            <option value="price-desc">Giá cao → thấp</option>
-                        </select>
-                    </label>
                 </div>
                 <p class="form-error" role="alert" data-filter-error></p>
                 <div class="book-grid" data-catalog-grid></div>

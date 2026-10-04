@@ -23,6 +23,8 @@
             client.post(`/borrow-orders/${path(borrowId)}/${encodeURIComponent(action)}/`, {}),
         requestBorrowReturn: (borrowId, data) =>
             client.post(`/borrow-orders/${path(borrowId)}/return-request/`, data),
+        addShipmentTracking: (shipmentId, data) =>
+            client.post(`/shipments/${path(shipmentId)}/tracking/`, data),
         lendListings: (query = {}) =>
             client.get(global.PassbookApiUtils.withQuery("/lend-listings/", query)),
         createLendListing: (data) => client.post("/lend-listings/", data),

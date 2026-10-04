@@ -2,11 +2,14 @@ from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import serializers
 
 from users.models import Subject
+from config.cloudinary import verify_cloudinary_image
 from .models import (
     Book,
+    BookIdentifier,
     BookImage,
     BookWork,
     BookWorkSubject,
@@ -15,6 +18,7 @@ from .models import (
     Favorite,
     BorrowTerms,
     LendListing,
+    Review,
     SaleListing,
 )
 
@@ -42,6 +46,18 @@ class BookCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ('id', 'name')
+
+
+class BookReviewSerializer(serializers.ModelSerializer):
+    reviewer = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Review
+        fields = ('id', 'rating', 'comment', 'created_at', 'reviewer')
+
+    @staticmethod
+    def get_reviewer(review):
+        return {'id': review.reviewer_id, 'name': review.reviewer.full_name}
 
 
 class BookLocationSerializer(serializers.Serializer):
@@ -140,6 +156,7 @@ class BookSerializer(serializers.Serializer):
     category = BookCategorySerializer(read_only=True, allow_null=True)
     pickup_location = serializers.SerializerMethodField()
     images = BookImageSerializer(many=True, read_only=True)
+    reviews = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
@@ -226,6 +243,13 @@ class BookSerializer(serializers.Serializer):
         if language is None:
             return None
         return {'id': language.id, 'name': language.name, 'code': language.code}
+
+    @staticmethod
+    def get_reviews(book):
+        reviews = Review.objects.filter(
+            Q(sale_listing__book=book) | Q(lend_listing__book=book),
+        ).select_related('reviewer').order_by('-created_at', '-id')
+        return BookReviewSerializer(reviews, many=True).data
 
 
 class BookListSerializer(serializers.Serializer):
@@ -319,6 +343,10 @@ class BookWriteSerializer(serializers.Serializer):
     condition_status = serializers.ChoiceField(choices=Book.CONDITION_CHOICES)
     edition = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
     publication_year = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=9999)
+    author = serializers.CharField(max_length=500, required=False, allow_blank=True, allow_null=True)
+    publisher = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
+    isbn = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    condition_description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     pickup_location_id = serializers.JSONField(required=False, write_only=True)
     pickup_note = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
@@ -333,6 +361,10 @@ class BookWriteSerializer(serializers.Serializer):
             })
         if 'images' in attrs:
             images = attrs['images']
+            if self.instance is None and any('id' in image for image in images):
+                raise serializers.ValidationError({
+                    'images': 'Không thể gửi ID ảnh có sẵn khi tạo tin đăng mới.',
+                })
             urls = [image['image_url'] for image in images]
             public_ids = [
                 image.get('cloudinary_public_id')
@@ -359,7 +391,15 @@ class BookWriteSerializer(serializers.Serializer):
                     'images': 'Chỉ được chọn một ảnh chính.',
                 })
             for index, image in enumerate(images):
-                image.setdefault('sort_order', index)
+                image['sort_order'] = index
+                if 'id' not in image:
+                    verify_cloudinary_image(
+                        user_id=self.context['request'].user.id,
+                        image_url=image['image_url'],
+                        public_id=image.get('cloudinary_public_id'),
+                    )
+            if images and not any(image['is_primary'] for image in images):
+                images[0]['is_primary'] = True
         listing_type = attrs.get(
             'listing_type',
             'BORROW' if self.instance and self.instance._active_lend_listing() else 'BUY',
@@ -392,6 +432,7 @@ class BookWriteSerializer(serializers.Serializer):
         now = timezone.now()
         subject = validated_data.pop('subject', None)
         category = validated_data.pop('category', None)
+        isbn = validated_data.pop('isbn', None)
         listing_type = validated_data.pop('listing_type', 'BUY')
         rental_fee = validated_data.pop('rental_fee', None)
         deposit_amount = validated_data.pop('deposit_amount', None)
@@ -406,9 +447,21 @@ class BookWriteSerializer(serializers.Serializer):
         description = validated_data.get('description')
         condition = validated_data['condition_status']
         with transaction.atomic():
+            public_ids = [
+                image['cloudinary_public_id']
+                for image in images or []
+                if image.get('cloudinary_public_id')
+            ]
+            if public_ids and BookImage.objects.filter(
+                cloudinary_public_id__in=public_ids,
+            ).exists():
+                raise serializers.ValidationError({
+                    'images': 'Ảnh Cloudinary đã được gắn với một tin đăng khác.',
+                })
             work = BookWork.objects.create(
                 title=title,
                 description=description,
+                author_name=validated_data.get('author') or None,
                 category=category,
                 created_by=self.context['request'].user,
                 status='ACTIVE',
@@ -425,6 +478,7 @@ class BookWriteSerializer(serializers.Serializer):
             edition = BookEdition.objects.create(
                 book_work=work,
                 edition_name=validated_data.get('edition') or None,
+                publisher_name=validated_data.get('publisher') or None,
                 publication_year=validated_data.get('publication_year'),
                 created_at=now,
                 updated_at=now,
@@ -433,13 +487,19 @@ class BookWriteSerializer(serializers.Serializer):
                 book_edition=edition,
                 owner=self.context['request'].user,
                 condition_label=condition.upper(),
+                condition_description=validated_data.get('condition_description') or None,
                 status='AVAILABLE',
                 created_at=now,
                 updated_at=now,
             )
+            if isbn:
+                BookIdentifier.objects.create(
+                    book_edition=edition,
+                    identifier_type='ISBN',
+                    identifier_value=isbn.strip(),
+                    created_at=now,
+                )
             if images:
-                if not any(image['is_primary'] for image in images):
-                    images[0]['is_primary'] = True
                 BookImage.objects.bulk_create([
                     BookImage(
                         book=book,
@@ -520,7 +580,10 @@ class BookWriteSerializer(serializers.Serializer):
         now = timezone.now()
         with transaction.atomic():
             image_manifest = validated_data.pop('images', None)
+            has_isbn = 'isbn' in validated_data
+            isbn = validated_data.pop('isbn', None)
             if image_manifest is not None:
+                Book.objects.select_for_update().get(pk=book.pk)
                 current_images = {
                     image.id: image
                     for image in BookImage.objects.select_for_update().filter(book=book)
@@ -532,24 +595,38 @@ class BookWriteSerializer(serializers.Serializer):
                     raise serializers.ValidationError({
                         'images': 'Danh sách chứa ảnh không thuộc sách này.',
                     })
+                new_public_ids = [
+                    image['cloudinary_public_id']
+                    for image in image_manifest
+                    if 'id' not in image and image.get('cloudinary_public_id')
+                ]
+                if new_public_ids and BookImage.objects.filter(
+                    cloudinary_public_id__in=new_public_ids,
+                ).exclude(book=book).exists():
+                    raise serializers.ValidationError({
+                        'images': 'Ảnh Cloudinary đã được gắn với một tin đăng khác.',
+                    })
                 BookImage.objects.filter(book=book).update(is_primary=False)
                 BookImage.objects.filter(book=book).exclude(
                     pk__in=requested_ids,
                 ).delete()
-                if image_manifest and not any(
-                    image['is_primary'] for image in image_manifest
-                ):
-                    image_manifest[0]['is_primary'] = True
-                for image_data in image_manifest:
+                for index, image_data in enumerate(image_manifest):
                     image_id = image_data.pop('id', None)
-                    image = current_images.get(image_id) if image_id else BookImage(
-                        book=book,
-                        created_at=now,
+                    if image_id:
+                        image = current_images[image_id]
+                    else:
+                        image = BookImage(book=book, created_at=now)
+                    if not image_id:
+                        image.image_url = image_data['image_url']
+                        image.cloudinary_public_id = image_data.get(
+                            'cloudinary_public_id',
+                        )
+                    image.is_primary = image_data['is_primary'] or (
+                        index == 0 and not any(
+                            item['is_primary'] for item in image_manifest
+                        )
                     )
-                    image.image_url = image_data['image_url']
-                    image.cloudinary_public_id = image_data.get('cloudinary_public_id')
-                    image.is_primary = image_data['is_primary']
-                    image.sort_order = image_data['sort_order']
+                    image.sort_order = index
                     image.save()
             if 'title' in validated_data:
                 listing.title = validated_data['title']
@@ -577,19 +654,58 @@ class BookWriteSerializer(serializers.Serializer):
                 book.book_edition.edition_name = validated_data['edition'] or None
             if 'publication_year' in validated_data:
                 book.book_edition.publication_year = validated_data['publication_year']
+            if 'author' in validated_data:
+                work.author_name = validated_data['author'] or None
+            if 'publisher' in validated_data:
+                book.book_edition.publisher_name = validated_data['publisher'] or None
+            if 'condition_description' in validated_data:
+                book.condition_description = validated_data['condition_description'] or None
+            if has_isbn:
+                BookIdentifier.objects.filter(
+                    book_edition=book.book_edition,
+                    identifier_type__icontains='ISBN',
+                ).delete()
+                if isbn.strip():
+                    BookIdentifier.objects.create(
+                        book_edition=book.book_edition,
+                        identifier_type='ISBN',
+                        identifier_value=isbn.strip(),
+                        created_at=now,
+                    )
             if 'category' in validated_data:
                 work.category = validated_data['category']
             if 'subject' in validated_data:
-                BookWorkSubject.objects.filter(
-                    book_work=work, is_primary=True,
-                ).update(is_primary=False)
-                if validated_data['subject'] is not None:
-                    BookWorkSubject.objects.create(
+                subject = validated_data['subject']
+                primary_link = BookWorkSubject.objects.filter(
+                    book_work=work,
+                    is_primary=True,
+                ).first()
+                if subject is None:
+                    BookWorkSubject.objects.filter(
                         book_work=work,
-                        subject=validated_data['subject'],
                         is_primary=True,
-                        created_at=now,
-                    )
+                    ).update(is_primary=False)
+                elif primary_link is None or primary_link.subject_id != subject.id:
+                    BookWorkSubject.objects.filter(
+                        book_work=work,
+                        is_primary=True,
+                    ).exclude(subject=subject).update(is_primary=False)
+                    subject_link = BookWorkSubject.objects.filter(
+                        book_work=work,
+                        subject=subject,
+                    ).first()
+                    if subject_link is None:
+                        BookWorkSubject.objects.create(
+                            book_work=work,
+                            subject=subject,
+                            is_primary=True,
+                            created_at=now,
+                        )
+                    elif not subject_link.is_primary:
+                        BookWorkSubject.objects.filter(
+                            book_work=work,
+                            subject=subject,
+                        ).update(is_primary=True)
             listing.updated_at = now
             work.updated_at = now
             book.updated_at = now

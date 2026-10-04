@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from books.pagination import BookPagination
+from users.models import User
 from .models import Report
 from .serializers import ReportCreateSerializer, ReportSerializer
 
@@ -26,16 +27,19 @@ class ReportCreateView(APIView):
             raise serializers.ValidationError({
                 'book_id': 'Không thể báo cáo sách không còn hiển thị.',
             })
-        report = Report.objects.filter(
-            reporter=request.user,
-            reason=data['reason'],
-            description=data.get('description') or None,
-            **{target_name: data[target_name]},
-        ).first()
-        if report is not None:
-            return Response(ReportSerializer(report).data, status=status.HTTP_200_OK)
-
         with transaction.atomic():
+            User.objects.select_for_update().get(pk=request.user.pk)
+            report = Report.objects.filter(
+                reporter=request.user,
+                reason=data['reason'],
+                status__in=('OPEN', 'IN_REVIEW'),
+                **{target_name: data[target_name]},
+            ).first()
+            if report is not None:
+                return Response(
+                    ReportSerializer(report).data,
+                    status=status.HTTP_200_OK,
+                )
             report = Report.objects.create(
                 reporter=request.user,
                 reason=data['reason'],

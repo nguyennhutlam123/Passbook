@@ -50,6 +50,8 @@ pip install -r requirements.txt
 
 Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. Với cấu hình local, có thể sao chép file mẫu thành `backend/.env`, điền Gmail App Password vào đó rồi nạp file khi chạy backend. Không commit file `.env`.
 
+Email xác nhận đơn hàng và email khi quản trị viên đổi trạng thái đơn dùng SMTP hiện có. Cần cấu hình `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL`; nếu thiếu thông tin SMTP, thông báo trong ứng dụng vẫn được tạo nhưng backend ghi rõ lỗi gửi email vào log.
+
 ## Chạy backend
 
 ```bash
@@ -87,6 +89,9 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
   phiên bản/năm/ngôn ngữ, condition, khoảng giá và sort. Các lựa chọn filter lấy từ API.
 - **Books:** marketplace Mua dùng `sale_listings`; marketplace Mượn dùng `lend_listings`
   và `borrow_terms`. Form đăng tin mặc định BUY cho client/dữ liệu legacy không gửi type.
+  Mỗi tin hỗ trợ tối đa 10 ảnh JPG/PNG/WebP/GIF (10 MB/ảnh); backend xác minh định dạng,
+  dung lượng và URL với Cloudinary trước khi lưu `BookImage`. Cloudinary cần được cấu hình
+  qua `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` và `CLOUDINARY_API_SECRET` trong môi trường.
 - **Commerce:** cart, checkout, order, payment simulation, shipping/tracking, return/refund.
 - **Borrow:** đăng ký qua `book_reservations`, không qua Cart/Checkout/Order. Với schema Lite
   hiện tại, reservation `CONFIRMED` biểu diễn sách đang được mượn; `COMPLETED` biểu diễn đã trả.

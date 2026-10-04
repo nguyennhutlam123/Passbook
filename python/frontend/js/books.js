@@ -73,6 +73,11 @@ async function loadCatalogOptions() {
     populateOptions(document.querySelector("#filter-category"), options.categories, "Tất cả danh mục");
     populateOptions(document.querySelector("#filter-language"), options.languages, "Tất cả ngôn ngữ");
     const urlParams = new URLSearchParams(location.search);
+    const categorySlug = urlParams.get("category_slug");
+    if (categorySlug) {
+        const category = (options.categories || []).find((item) => item.slug === categorySlug);
+        if (category) document.querySelector("#filter-category").value = String(category.id);
+    }
     for (const [selector, key, urlKey = key] of catalogFilters) {
         const field = document.querySelector(selector);
         const value = urlParams.get(urlKey);
@@ -94,7 +99,7 @@ async function loadBooks(page = 1) {
     }
     error.textContent = "";
     syncCatalogUrl(page);
-    grid.innerHTML = '<div class="loading-state" role="status">Đang tải giáo trình...</div>';
+    grid.innerHTML = '<div class="loading-state" role="status">Đang tải sách...</div>';
     try {
         const data = borrowCatalog
             ? await BooksAPI.lendListings(params)
@@ -121,6 +126,8 @@ async function loadBooks(page = 1) {
             seller: listing.seller,
             listing_type: "BORROW",
             listing_id: listing.id,
+            borrow_terms: listing.borrow_terms,
+            deposit_amount: listing.deposit_amount,
         } : listing);
         grid.innerHTML = books.map(renderApiBookCard).join("");
         bindFavoriteButtons(grid);
@@ -128,7 +135,7 @@ async function loadBooks(page = 1) {
         attachImageFallbacks(grid);
         grid.hidden = !books.length;
         empty.hidden = Boolean(books.length);
-        document.querySelector("[data-result-count]").textContent = `${data.count} giáo trình`;
+        document.querySelector("[data-result-count]").textContent = `${data.count} sách`;
         const pagination = document.querySelector("[data-pagination]");
         pagination.replaceChildren();
         if (data.previous) {
@@ -149,7 +156,7 @@ async function loadBooks(page = 1) {
         }
     } catch (requestError) {
         if (requestId !== catalogRequestId) return;
-        grid.replaceChildren(PassbookCommonComponents.emptyState("Không thể tải giáo trình.", requestError.message));
+        grid.replaceChildren(PassbookCommonComponents.emptyState("Không thể tải sách.", requestError.message));
         empty.hidden = true;
         const retry = document.createElement("button");
         retry.className = "button button-outline";
@@ -213,11 +220,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.querySelector("[data-reset-empty]")?.addEventListener("click", () => {
         window.location.assign(catalogPage());
     });
-    document.querySelector("[data-filter-open]")?.addEventListener("click", () =>
-        document.querySelector(".filter-panel")?.classList.add("is-open"),
+    const filterPanel = document.querySelector(".filter-panel");
+    const filterToggle = document.querySelector("[data-filter-open]");
+    const setFiltersOpen = (open) => {
+        filterPanel?.classList.toggle("is-open", open);
+        filterToggle?.setAttribute("aria-expanded", String(open));
+        if (filterToggle) filterToggle.querySelector("span").textContent = open ? "⌃" : "⌄";
+    };
+    filterToggle?.addEventListener("click", () =>
+        setFiltersOpen(!filterPanel?.classList.contains("is-open")),
     );
     document.querySelector("[data-filter-close]")?.addEventListener("click", () =>
-        document.querySelector(".filter-panel")?.classList.remove("is-open"),
+        setFiltersOpen(false),
     );
     try {
         await loadCatalogOptions();

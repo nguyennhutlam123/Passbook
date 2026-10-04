@@ -38,7 +38,7 @@ ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get(
         'ALLOWED_HOSTS',
-        'localhost,127.0.0.1',
+        'localhost,127.0.0.1,testserver',
     ).split(',')
     if host.strip()
 ]
@@ -77,10 +77,12 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:5500,http://127.0.0.1:5500,https://passbook-frontend.onrender.com',
+        'http://localhost:5500,http://127.0.0.1:5500,http://localhost:8000,http://127.0.0.1:8000,https://passbook-frontend.onrender.com',
     ).split(',')
     if origin.strip()
 ]
+
+CORS_ALLOW_CREDENTIALS = True
 
 CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME', '')
 CLOUDINARY_API_KEY = os.environ.get('CLOUDINARY_API_KEY', '')
@@ -89,7 +91,7 @@ CLOUDINARY_UPLOAD_FOLDER = os.environ.get(
     'CLOUDINARY_UPLOAD_FOLDER',
     'passbook/books',
 )
-PASSBOOK_PLATFORM_FEE_RATE = os.environ.get('PASSBOOK_PLATFORM_FEE_RATE', '0')
+PASSBOOK_PLATFORM_FEE_RATE = os.environ.get('PASSBOOK_PLATFORM_FEE_RATE', '0.10')
 PASSBOOK_FAKE_PAYMENTS_ENABLED = (
     os.environ.get(
         'PASSBOOK_FAKE_PAYMENTS_ENABLED',

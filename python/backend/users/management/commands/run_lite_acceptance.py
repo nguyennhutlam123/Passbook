@@ -1179,9 +1179,6 @@ class Command(BaseCommand):
             (lender_client, 'confirm', 'CONFIRMED'),
             (lender_client, 'ready', 'READY_FOR_PICKUP'),
             (other_client, 'start', 'ACTIVE'),
-            (other_client, 'request-return', 'RETURN_REQUESTED'),
-            (lender_client, 'return', 'RETURNED'),
-            (other_client, 'complete', 'COMPLETED'),
         ):
             response = client.post(
                 f'/api/borrow-orders/{borrow.id}/{action}/',
@@ -1191,12 +1188,43 @@ class Command(BaseCommand):
             self.assert_status(response, 200, f'borrow {action}')
             if response.data['status'] != expected:
                 raise CommandError(f'Borrow {action} resulted in {response.data["status"]}.')
+
+        return_request = other_client.post(
+            f'/api/borrow-orders/{borrow.id}/return-request/',
+            {
+                'return_method': 'DELIVERY',
+                'carrier': 'Acceptance local carrier',
+                'return_tracking_code': f'{FIXTURE_PREFIX}return-{uuid4().hex[:16]}',
+            },
+            format='json',
+        )
+        self.assert_status(return_request, 201, 'borrow return request and shipment')
+        shipment_id = return_request.data['shipment']['id']
+        for tracking_status in ('PICKED_UP', 'IN_TRANSIT', 'DELIVERED'):
+            self.assert_status(
+                other_client.post(
+                    f'/api/shipments/{shipment_id}/tracking/',
+                    {'status': tracking_status},
+                    format='json',
+                ),
+                201,
+                f'borrow return tracking {tracking_status}',
+            )
+        self.assert_status(
+            lender_client.post(
+                f'/api/borrow-orders/{borrow.id}/complete/',
+                {},
+                format='json',
+            ),
+            200,
+            'lender confirms returned book',
+        )
         invalid = other_client.post(
             f'/api/borrow-orders/{borrow.id}/complete/',
             {},
             format='json',
         )
-        self.assert_status(invalid, 400, 'invalid borrow transition')
+        self.assert_status(invalid, 403, 'borrower cannot confirm returned book')
 
     def run_concurrency_probes(self):
         buyer_one = User.objects.get(email=f'{FIXTURE_PREFIX}buyer_1@example.invalid')

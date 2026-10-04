@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phiếu mượn - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell workspace-page" data-workspace-page data-workspace-view="borrows">
+        <section class="section-heading">
+            <div><span class="eyebrow">Giao dịch</span><h1>Phiếu mượn</h1></div>
+            <a class="button button-outline" href="orders.html">Đơn hàng</a>
+        </section>
+        <section class="workspace-section" aria-labelledby="reservations-title">
+            <div class="section-heading"><h2 id="reservations-title">Yêu cầu mượn</h2><button class="button button-outline" type="button" data-reservations-refresh>Cập nhật</button></div>
+            <div class="report-list" data-reservations-list><p class="loading-state">Đang tải yêu cầu...</p></div>
+        </section>
+        <section class="workspace-section" aria-labelledby="borrow-title">
+            <div class="section-heading"><h2 id="borrows-title">Giao dịch mượn</h2><button class="button button-outline" type="button" data-borrows-refresh>Cập nhật</button></div>
+            <div class="report-list" data-borrows-list><p class="loading-state">Đang tải phiếu mượn...</p></div>
+        </section>
+        <p class="form-error" role="alert" data-workspace-error></p>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script><script src="js/core/errors.js"></script><script src="js/core/auth.js"></script><script src="js/core/router.js"></script><script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script><script src="js/components/books/book-card.js"></script><script src="js/components/commerce/cards.js"></script><script src="js/components/messaging/cards.js"></script>
+    <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/users-api.js"></script><script src="js/api/books-api.js"></script><script src="js/api/favorites-api.js"></script><script src="js/api/reservations-api.js"></script><script src="js/api/orders-api.js?v=borrow-return"></script><script src="js/api/payments-api.js"></script><script src="js/api/shipping-api.js"></script><script src="js/api/returns-api.js"></script><script src="js/api/messaging-api.js"></script><script src="js/api/notifications-api.js"></script><script src="js/api/reports-api.js"></script><script src="js/api/admin-api.js"></script>
+    <script src="js/main.js"></script><script src="js/workspace.js"></script>
+</body>
+</html>

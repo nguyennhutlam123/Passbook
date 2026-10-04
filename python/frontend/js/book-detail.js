@@ -5,8 +5,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     const id = params.get("id");
     const listingType = params.get("listing_type");
     const listingId = params.get("listing_id");
-    const toLocalDateTime = (date) =>
-        new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
     if (!id) {
         container.innerHTML = '<div class="empty-state"><strong>Không tìm thấy mã giáo trình.</strong><a class="button button-primary" href="books.html">Về danh sách</a></div>';
         return;
@@ -22,12 +20,14 @@ document.addEventListener("DOMContentLoaded", async () => {
                 title: listing.title,
                 description: listing.description,
                 price: listing.rental_fee,
-                status: "available",
+                status: listing.book.status,
                 seller: listing.seller,
                 listing_type: "BORROW",
                 listing_id: listing.id,
+                images: listing.images || [],
                 borrow_terms: listing.borrow_terms,
                 deposit_amount: listing.deposit_amount,
+                reviews: listing.reviews || [],
             };
         } else {
             book = await BooksAPI.get(id);
@@ -43,21 +43,28 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         const images = book.images || [];
         const mainImage = container.querySelector("[data-detail-main-image]");
-        mainImage.src = safeImageUrl((images.find((item) => item.is_primary) || images[0])?.image_url);
+        const fallbackImage = "https://placehold.co/640x860/f0e5d7/263b4a?text=PASSBOOK";
+        const primaryImage = images.find((item) => item.is_primary) || images[0];
+        mainImage.src = primaryImage?.image_url
+            ? safeImageUrl(primaryImage.image_url)
+            : fallbackImage;
         mainImage.alt = `Ảnh ${book.title}`;
         mainImage.addEventListener("error", () => {
-            mainImage.src = `https://placehold.co/640x860/f0e5d7/263b4a?text=${encodeURIComponent(book.subject?.name || "PASSBOOK")}`;
-        }, {once: true});
+            if (mainImage.src !== fallbackImage) mainImage.src = fallbackImage;
+        });
         const thumbs = container.querySelector("[data-detail-thumbs]");
         thumbs.replaceChildren();
         images.forEach((image, index) => {
             const source = safeImageUrl(image.image_url);
             const thumb = document.createElement("button");
-            thumb.className = `gallery-thumb ${index === 0 ? "is-active" : ""}`;
+            thumb.className = `gallery-thumb ${image === primaryImage ? "is-active" : ""}`;
             thumb.type = "button";
             const thumbnailImage = document.createElement("img");
             thumbnailImage.src = source;
             thumbnailImage.alt = `Ảnh ${index + 1}`;
+            thumbnailImage.addEventListener("error", () => {
+                thumbnailImage.src = fallbackImage;
+            }, {once: true});
             thumb.append(thumbnailImage);
             thumb.addEventListener("click", () => {
                 mainImage.src = source;
@@ -69,12 +76,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         const status = container.querySelector("[data-detail-status]");
         status.className = "badge badge-success";
         const availabilityLabels = {
-            available: "Đang bán",
-            reserved: "Đang được giữ",
+            available: book.listing_type === "BORROW" ? "Đang cho mượn" : "Đang bán",
+            reserved: "Có yêu cầu đang xử lý",
+            on_loan: "Đang được mượn",
             sold: "Đã bán",
             hidden: "Đã ẩn",
         };
-        if (book.listing_type === "BORROW") availabilityLabels.available = "Đang cho mượn";
         const conditionLabel = {
             new: "Mới",
             like_new: "Như mới",
@@ -110,11 +117,23 @@ document.addEventListener("DOMContentLoaded", async () => {
             ["Ngôn ngữ", book.language?.name],
             ["Tình trạng sách", book.condition_description],
             ...(book.listing_type === "BORROW" ? [
+                ["Trường", book.seller?.university?.name],
+                ["Khoa", book.seller?.faculty?.name],
+                ["Ngành", book.seller?.major?.name],
+                ["Người cho mượn", book.seller?.name],
                 ["Thời hạn mượn tối đa", book.borrow_terms?.max_days
                     ? `${book.borrow_terms.max_days} ngày`
                     : null],
-                ["Bên chịu phí giao nhận", book.borrow_terms?.shipping_paid_by],
-                ["Cách trả sách", book.borrow_terms?.return_method],
+                ["Phí trễ hạn mỗi ngày", book.borrow_terms?.late_fee_per_day],
+                ["Cách trả sách", {
+                    IN_PERSON: "Gặp trực tiếp",
+                    POSTAL: "Gửi bưu điện",
+                }[book.borrow_terms?.return_method] || book.borrow_terms?.return_method],
+                ["Bên chịu phí giao nhận", {
+                    BORROWER: "Người mượn",
+                    LENDER: "Người cho mượn",
+                }[book.borrow_terms?.shipping_paid_by] || book.borrow_terms?.shipping_paid_by],
+                ["Bắt buộc đặt cọc", book.borrow_terms?.deposit_required ? "Có" : "Không"],
                 ["Tiền đặt cọc", book.deposit_amount],
                 ["Điều kiện mượn", book.borrow_terms?.notes],
             ] : []),
@@ -123,6 +142,27 @@ document.addEventListener("DOMContentLoaded", async () => {
             .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "—")}</dd></div>`)
             .join("");
         container.querySelector("[data-detail-description]").textContent = book.description || "Chưa có mô tả.";
+        const reviews = book.reviews || [];
+        const reviewPanel = container.querySelector("[data-detail-reviews]");
+        reviewPanel.hidden = reviews.length === 0;
+        const reviewTitle = reviewPanel.querySelector("[data-review-title]");
+        reviewTitle.textContent = `Đánh giá sách (${reviews.length})`;
+        const reviewList = reviewPanel.querySelector("[data-review-list]");
+        reviewList.replaceChildren(...(reviews.length
+            ? reviews.map((review) => {
+                const card = document.createElement("article");
+                card.className = "review-card";
+                const heading = document.createElement("strong");
+                heading.textContent = `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)} · ${review.reviewer?.name || "Người dùng"}`;
+                const time = document.createElement("time");
+                time.dateTime = review.created_at;
+                time.textContent = new Date(review.created_at).toLocaleDateString("vi-VN");
+                const comment = document.createElement("p");
+                comment.textContent = review.comment || "Không có nhận xét.";
+                card.append(heading, time, comment);
+                return card;
+            })
+            : [PassbookCommonComponents.emptyState("Chưa có đánh giá.")]));
         const intentPanel = container.querySelector("[data-detail-intents]");
         const renderIntentPanel = (summary) => {
             intentPanel.replaceChildren();
@@ -169,7 +209,27 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         }
         const sellerName = book.seller?.name || "Người bán";
-        container.querySelector("[data-detail-seller]").innerHTML = `<div class="seller-line"><span class="avatar">${escapeHtml(sellerName.slice(0, 2).toUpperCase())}</span><strong>${escapeHtml(sellerName)}</strong></div><p class="caption">${escapeHtml(book.seller?.university?.name || "Trường chưa khai báo")}</p>`;
+        const sellerPanel = container.querySelector("[data-detail-seller]");
+        sellerPanel.replaceChildren();
+        const sellerHeading = document.createElement("strong");
+        sellerHeading.textContent = book.listing_type === "BORROW" ? "Người cho mượn" : "Người đăng";
+        const sellerLine = document.createElement("div");
+        sellerLine.className = "seller-line";
+        const avatar = document.createElement("span");
+        avatar.className = "avatar";
+        avatar.textContent = sellerName.slice(0, 2).toUpperCase();
+        const profileLink = document.createElement("a");
+        profileLink.href = `public-profile.html?id=${encodeURIComponent(book.seller.id)}`;
+        profileLink.textContent = sellerName;
+        sellerLine.append(avatar, profileLink);
+        const school = document.createElement("p");
+        school.className = "caption";
+        school.textContent = book.seller?.university?.name || "Trường chưa khai báo";
+        const viewProfile = document.createElement("a");
+        viewProfile.className = "text-link";
+        viewProfile.href = profileLink.href;
+        viewProfile.textContent = "Xem trang cá nhân";
+        sellerPanel.append(sellerHeading, sellerLine, school, viewProfile);
         const actions = container.querySelector("[data-detail-actions]");
         actions.innerHTML = "";
         if (book.status === "available" && Number(book.seller?.id) !== Number(PassbookAuth.getCurrentUser()?.id)) {
@@ -177,86 +237,75 @@ document.addEventListener("DOMContentLoaded", async () => {
                 const borrowButton = document.createElement("button");
                 borrowButton.className = "button button-primary";
                 borrowButton.type = "button";
-                borrowButton.textContent = "Đăng ký mượn";
+                borrowButton.textContent = "Mượn ngay";
                 borrowButton.addEventListener("click", () => {
                     openBorrowReservationDialog({
                         bookId: book.id,
                         listingId: book.listing_id,
                         title: book.title,
+                        onCreated: () => {
+                            book.status = "reserved";
+                            status.textContent = `${availabilityLabels.reserved} · ${conditionLabel}`;
+                            borrowButton.remove();
+                        },
                     });
                 });
                 actions.appendChild(borrowButton);
             } else {
-                const cartButton = document.createElement("button");
-                cartButton.className = "button button-primary";
-                cartButton.type = "button";
-                cartButton.textContent = "Thêm vào giỏ";
-                cartButton.addEventListener("click", async () => {
+                const findSaleListing = async () => {
+                    let pageNumber = 1;
+                    let listing = null;
+                    let hasNext = true;
+                    while (hasNext && !listing) {
+                        const data = await BooksAPI.listings({
+                            search: book.title,
+                            page: pageNumber,
+                            page_size: 50,
+                        });
+                        listing = (data.results || []).find(
+                            (item) => Number(item.book_id) === Number(book.id),
+                        ) || null;
+                        hasNext = Boolean(data.next);
+                        pageNumber += 1;
+                    }
+                    if (!listing) {
+                        throw new PassbookErrors.ApiError(
+                            "Tin đăng không còn khả dụng để mua.",
+                            {status: 409, code: "listing_unavailable"},
+                        );
+                    }
+                    return listing;
+                };
+                const addToCart = async (button, buyNow) => {
                     if (!PassbookGuards.requireAuth()) return;
-                    cartButton.disabled = true;
+                    button.disabled = true;
                     try {
-                        let pageNumber = 1;
-                        let listing = null;
-                        let hasNext = true;
-                        while (hasNext && !listing) {
-                            const data = await BooksAPI.listings({
-                                search: book.title,
-                                page: pageNumber,
-                                page_size: 50,
-                            });
-                            listing = (data.results || []).find(
-                                (item) => Number(item.book_id) === Number(book.id),
-                            ) || null;
-                            hasNext = Boolean(data.next);
-                            pageNumber += 1;
-                        }
-                        if (!listing) {
-                            throw new PassbookErrors.ApiError(
-                                "Tin đăng không còn khả dụng để thêm vào giỏ.",
-                                {status: 409, code: "listing_unavailable"},
-                            );
-                        }
+                        const listing = await findSaleListing();
                         await OrdersAPI.addCartItem({
                             listing_type: "SALE",
                             listing_id: listing.id,
                         });
-                        window.location.assign("workspace.html#cart-title");
+                        window.location.assign(buyNow
+                            ? `cart.html?buy_now=${encodeURIComponent(listing.id)}`
+                            : "cart.html");
                     } catch (error) {
                         showToast(error.message);
                     } finally {
-                        cartButton.disabled = false;
+                        button.disabled = false;
                     }
-                });
-                const reserveButton = document.createElement("button");
-                reserveButton.className = "button button-outline";
-                reserveButton.type = "button";
-                reserveButton.textContent = "Đặt giữ";
-                reserveButton.addEventListener("click", () => {
-                    if (!PassbookGuards.requireAuth()) return;
-                    const defaultExpiry = toLocalDateTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
-                    const minimumExpiry = toLocalDateTime(new Date());
-                    showModal(`<form data-reservation-form><button class="modal-close" type="button" data-modal-close>Đóng</button><h2>Đặt giữ giáo trình</h2><label class="form-label" for="reservation-expiry">Giữ đến</label><input class="form-control" id="reservation-expiry" name="expires_at" type="datetime-local" min="${minimumExpiry}" value="${defaultExpiry}" required><p class="form-error" data-reservation-error></p><div class="modal-actions"><button class="button button-primary" type="submit">Gửi yêu cầu</button></div></form>`);
-                    const form = document.querySelector("[data-reservation-form]");
-                    form.addEventListener("submit", async (event) => {
-                        event.preventDefault();
-                        if (!form.reportValidity()) return;
-                        const submit = form.querySelector("button[type='submit']");
-                        const error = form.querySelector("[data-reservation-error]");
-                        submit.disabled = true;
-                        error.textContent = "";
-                        try {
-                            const expiresAt = new Date(new FormData(form).get("expires_at").toString());
-                            await ReservationsAPI.create(book.id, {expires_at: expiresAt.toISOString()});
-                            closeModal();
-                            showToast("Đã gửi yêu cầu đặt giữ.");
-                        } catch (requestError) {
-                            error.textContent = requestError.message;
-                        } finally {
-                            submit.disabled = false;
-                        }
-                    });
-                });
-                actions.append(cartButton, reserveButton);
+                };
+                const cartButton = document.createElement("button");
+                cartButton.className = "button button-outline";
+                cartButton.type = "button";
+                cartButton.textContent = "Thêm vào giỏ";
+                cartButton.addEventListener("click", () => addToCart(cartButton, false));
+                const buyNowButton = document.createElement("button");
+                buyNowButton.className = "button button-primary";
+                buyNowButton.type = "button";
+                buyNowButton.textContent = "Mua ngay";
+                buyNowButton.addEventListener("click", () => addToCart(buyNowButton, true));
+                actions.append(cartButton);
+                actions.append(buyNowButton);
             }
 
             const messageButton = document.createElement("button");
@@ -286,14 +335,24 @@ document.addEventListener("DOMContentLoaded", async () => {
                 PassbookRouter.navigate(PassbookRouter.loginUrl());
                 return;
             }
-            showModal(`<form data-report-form><button class="modal-close" type="button" data-modal-close>Đóng</button><h2>Báo cáo giáo trình</h2><label class="form-label" for="report-reason">Lý do</label><input id="report-reason" required maxlength="255"><label class="form-label" for="report-description">Mô tả</label><textarea id="report-description" required maxlength="5000"></textarea><div class="modal-actions"><button class="button button-primary" type="submit">Gửi báo cáo</button></div></form>`);
+            const reportListingId = book.listing_id || listingId;
+            showModal(`<form data-report-form><button class="modal-close" type="button" data-modal-close>Đóng</button><h2>Báo cáo</h2><label class="form-label" for="report-target">Đối tượng</label><select class="form-control" id="report-target" name="target"><option value="book">Thông tin sách</option>${reportListingId ? '<option value="listing">Tin đăng</option>' : ""}${book.seller?.id ? '<option value="user">Người dùng</option>' : ""}</select><label class="form-label" for="report-reason">Lý do</label><select class="form-control" id="report-reason" name="reason" required><option value="INAPPROPRIATE_CONTENT">Nội dung không phù hợp</option><option value="INCORRECT_BOOK_INFO">Thông tin sách sai</option><option value="SPAM">Spam</option><option value="SCAM">Lừa đảo</option><option value="POLICY_VIOLATION">Nội dung vi phạm</option><option value="OTHER">Lý do khác</option></select><label class="form-label" for="report-description">Mô tả (không bắt buộc)</label><textarea class="form-control" id="report-description" name="description" maxlength="5000"></textarea><div class="modal-actions"><button class="button button-primary" type="submit">Gửi báo cáo</button></div></form>`);
             document.querySelector("[data-report-form]").addEventListener("submit", async (event) => {
                 event.preventDefault();
-                const reason = document.querySelector("#report-reason").value.trim();
-                const description = document.querySelector("#report-description").value.trim();
-                if (!reason || !description) return;
+                const form = event.currentTarget;
+                const formData = new FormData(form);
+                const target = formData.get("target");
+                const report = {
+                    reason: formData.get("reason"),
+                    description: formData.get("description").toString().trim(),
+                    ...(target === "book" ? {book_id: book.id} : {}),
+                    ...(target === "listing" && book.listing_type === "BORROW"
+                        ? {lend_listing_id: reportListingId}
+                        : target === "listing" ? {sale_listing_id: reportListingId} : {}),
+                    ...(target === "user" ? {reported_user_id: book.seller.id} : {}),
+                };
                 try {
-                    await ReportsAPI.create({book_id: book.id, reason, description});
+                    await ReportsAPI.create(report);
                     closeModal();
                     showToast("Đã gửi báo cáo.");
                 } catch (error) {

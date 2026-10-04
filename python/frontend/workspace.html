@@ -9,76 +9,17 @@
 </head>
 <body>
     <header class="site-header" data-site-header></header>
-    <main class="page-shell workspace-page" data-workspace-page>
-        <section class="section-heading">
-            <div>
-                <span class="eyebrow">Tài khoản</span>
-                <h1>Giao dịch của tôi</h1>
-            </div>
-            <button class="button button-outline" type="button" data-workspace-refresh>Tải lại</button>
+    <main class="page-shell workspace-page">
+        <section class="page-intro">
+            <span class="eyebrow">Tài khoản</span>
+            <h1>Giao dịch của tôi</h1>
+            <p class="text-secondary">Mở riêng giỏ hàng, đơn hàng hoặc phiếu mượn để theo dõi từng giao dịch.</p>
         </section>
-        <section class="workspace-section" aria-labelledby="cart-title">
-            <h2 id="cart-title">Giỏ hàng</h2>
-            <div class="report-list" data-cart-items><p class="loading-state">Đang tải giỏ hàng...</p></div>
-            <p class="workspace-total" data-cart-total></p>
-            <form class="workspace-checkout" data-checkout-form hidden>
-                <h3>Checkout</h3>
-                <div data-checkout-summary>
-                    <p class="loading-state">Đang tính tiền từ server...</p>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="checkout-recipient">Người nhận</label>
-                    <input class="form-control" id="checkout-recipient" name="recipient_name" required maxlength="255">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="checkout-phone">Số điện thoại</label>
-                    <input class="form-control" id="checkout-phone" name="phone" required maxlength="30">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="checkout-address">Địa chỉ</label>
-                    <input class="form-control" id="checkout-address" name="address_line" required maxlength="500">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="checkout-city">Tỉnh / thành phố</label>
-                    <input class="form-control" id="checkout-city" name="city" required maxlength="255">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="checkout-payment-outcome">Phương thức thanh toán</label>
-                    <select class="form-control" id="checkout-payment-outcome" name="payment_outcome">
-                        <option value="SUCCESS">Fake Payment Provider — Thành công</option>
-                        <option value="FAILURE">Fake Payment Provider — Thất bại</option>
-                        <option value="CANCEL">Fake Payment Provider — Hủy</option>
-                    </select>
-                </div>
-                <div class="modal-actions">
-                    <button class="button button-outline" type="button" data-checkout-cancel>Hủy</button>
-                    <button class="button button-primary" type="submit">Đặt hàng</button>
-                </div>
-            </form>
-            <p class="form-error" role="alert" data-cart-error></p>
-        </section>
-        <section class="workspace-section" aria-labelledby="orders-title">
-            <div class="section-heading">
-                <h2 id="orders-title">Đơn hàng</h2>
-                <button class="button button-outline" type="button" data-orders-refresh>Cập nhật đơn hàng</button>
-            </div>
-            <div class="report-list" data-orders-list><p class="loading-state">Đang tải đơn hàng...</p></div>
-        </section>
-        <section class="workspace-section" aria-labelledby="reservations-title">
-            <div class="section-heading">
-                <h2 id="reservations-title">Yêu cầu mượn / đặt giữ</h2>
-                <button class="button button-outline" type="button" data-reservations-refresh>Cập nhật</button>
-            </div>
-            <div class="report-list" data-reservations-list><p class="loading-state">Đang tải yêu cầu...</p></div>
-        </section>
-        <section class="workspace-section" aria-labelledby="borrow-title">
-            <div class="section-heading">
-                <h2 id="borrow-title">Giao dịch mượn sách</h2>
-                <button class="button button-outline" type="button" data-borrows-refresh>Cập nhật</button>
-            </div>
-            <div class="report-list" data-borrows-list><p class="loading-state">Đang tải giao dịch...</p></div>
-        </section>
-        <p class="form-error" role="alert" data-workspace-error></p>
+        <nav class="transaction-hub" aria-label="Các trang giao dịch">
+            <a class="transaction-hub__card" href="cart.html"><strong>Giỏ hàng</strong><span>Xem giỏ và hoàn tất đặt hàng.</span></a>
+            <a class="transaction-hub__card" href="orders.html"><strong>Đơn hàng</strong><span>Theo dõi đơn mua và tiến trình giao hàng.</span></a>
+            <a class="transaction-hub__card" href="borrow-tickets.html"><strong>Phiếu mượn</strong><span>Quản lý yêu cầu mượn và trả sách.</span></a>
+        </nav>
     </main>
     <footer class="site-footer" data-site-footer></footer>
     <script src="js/core/storage.js"></script>
@@ -106,6 +47,5 @@
     <script src="js/api/reports-api.js"></script>
     <script src="js/api/admin-api.js"></script>
     <script src="js/main.js"></script>
-    <script src="js/workspace.js"></script>
 </body>
 </html>

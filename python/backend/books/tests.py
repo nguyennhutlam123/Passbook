@@ -1,19 +1,33 @@
+import json
 import re
+from contextlib import nullcontext
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from django.contrib import admin
 from django.apps import apps
 from django.conf import settings
 from django.utils import timezone
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
+from django.urls import resolve
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from config.cloudinary import verify_cloudinary_image
 from config.composite_admin import CompositeKeyAdmin
-from .models import Book, BookReservation, BorrowOrder, Payment
+from .category_taxonomy import BOOK_CATEGORIES
+from .models import (
+    Book,
+    BookReservation,
+    BorrowOrder,
+    CheckoutGroup,
+    Order,
+    Payment,
+    Shipment,
+    ShipmentTracking,
+)
 from .serializers import (
     BookSerializer,
     BookListSerializer,
@@ -30,9 +44,12 @@ from .services import (
     transition_borrow_order,
     transition_reservation,
 )
+from .shipment_services import update_shipment_status
 from .sale_api_views import SaleListingDetailView, SaleListingInputSerializer
 from .commerce_api_views import (
     BookReservationListCreateView,
+    BorrowOrderReturnRequestView,
+    BorrowReturnInputSerializer,
     CartItemInputSerializer,
     CheckoutView,
     FakePaymentTransitionView,
@@ -41,13 +58,165 @@ from .commerce_api_views import (
     PaymentListCreateView,
     RefundCreateView,
     ReturnActionView,
+    ShipmentTrackingCreateView,
     CheckoutAddressInputSerializer,
     CheckoutInputSerializer,
     lend_listing_payload,
 )
-from .api_views import BookDetailView
+from .public_profile_api_views import PublicUserListingsView
+from .api_views import BookDetailView, BookImageListView
 from .request_api_views import BookIntentSummaryView, BookRequestDetailView
 from users.models import OtpVerification
+
+
+class BookCategoryTaxonomyTests(SimpleTestCase):
+    def test_taxonomy_contains_exactly_the_supported_ordered_categories(self):
+        self.assertEqual(
+            [name for _slug, name, _description in BOOK_CATEGORIES],
+            [
+                'Tiểu thuyết',
+                'Thơ',
+                'Kịch',
+                'Sách giáo khoa',
+                'Giáo trình',
+                'Tài liệu',
+                'Truyện tranh',
+            ],
+        )
+        self.assertEqual(len({slug for slug, _name, _description in BOOK_CATEGORIES}), 7)
+
+
+class PublicUserListingsApiTests(SimpleTestCase):
+    class ListingRows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def count(self):
+            return len(self.rows)
+
+        def __getitem__(self, key):
+            return self.rows[key]
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user_id = 72
+        self.sale = self._listing('SALE', listing_id=101, book_id=501, created=3)
+        self.borrow = self._listing('BORROW', listing_id=102, book_id=502, created=2)
+        self.other_sale = self._listing('SALE', listing_id=103, book_id=503, created=1)
+
+    @staticmethod
+    def _listing(listing_type, *, listing_id, book_id, created):
+        university = SimpleNamespace(id=7, name='Local University')
+        seller = SimpleNamespace(
+            id=72,
+            full_name='Public Seller',
+            university_id=university.id,
+            university=university,
+        )
+        category = SimpleNamespace(id=3, name='Giáo trình')
+        subject = SimpleNamespace(id=9, name='Vật lý', code='PHY101')
+        work = SimpleNamespace(
+            category_id=category.id,
+            category=category,
+            primary_subject_links=[SimpleNamespace(subject=subject)],
+        )
+        edition = SimpleNamespace(
+            book_work=work,
+            edition_name='Local edition',
+            publication_year=2025,
+        )
+        book = SimpleNamespace(
+            id=book_id,
+            condition_status='like_new',
+            condition_label='LIKE_NEW',
+            book_edition=edition,
+            public_primary_images=[
+                SimpleNamespace(
+                    id=listing_id,
+                    image_url=f'https://example.invalid/{book_id}.jpg',
+                    is_primary=True,
+                ),
+            ],
+        )
+        return SimpleNamespace(
+            id=listing_id,
+            book=book,
+            seller=seller,
+            lender=seller,
+            title=f'Public book {book_id}',
+            price=Decimal('120000'),
+            rental_fee=Decimal('10000'),
+            deposit_amount=Decimal('50000'),
+            created_at=timezone.now() + timedelta(seconds=created),
+            public_listing_terms=SimpleNamespace(
+                max_days=14,
+                deposit_required=True,
+            ),
+            listing_type=listing_type,
+        )
+
+    def _request(self, params=None):
+        request = self.factory.get(
+            f'/api/users/{self.user_id}/listings/',
+            params or {},
+            HTTP_HOST='localhost',
+        )
+        with patch(
+            'books.public_profile_api_views.get_object_or_404',
+        ) as get_user, patch(
+            'books.public_profile_api_views._listing_queryset',
+            side_effect=lambda kind, _user_id, _now: self.ListingRows(
+                [self.sale, self.other_sale] if kind == 'SALE' else [self.borrow],
+            ),
+        ):
+            get_user.return_value = SimpleNamespace(id=self.user_id)
+            response = PublicUserListingsView.as_view()(request, user_id=self.user_id)
+        return response
+
+    def test_public_all_filter_merges_sale_and_borrow_with_pagination(self):
+        response = self._request({'type': 'ALL', 'page_size': '2'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 3)
+        self.assertEqual(response.data['sale_count'], 2)
+        self.assertEqual(response.data['borrow_count'], 1)
+        self.assertEqual(
+            [item['listing_type'] for item in response.data['results']],
+            ['SALE', 'BORROW'],
+        )
+        self.assertIsNotNone(response.data['next'])
+        self.assertIsNone(response.data['previous'])
+        self.assertEqual(response.data['results'][0]['id'], self.sale.book.id)
+        self.assertEqual(response.data['results'][1]['listing_id'], self.borrow.id)
+        self.assertEqual(response.data['results'][1]['borrow_terms']['max_days'], 14)
+        for item in response.data['results']:
+            self.assertNotIn('phone', item['seller'])
+            self.assertNotIn('email', item['seller'])
+            self.assertNotIn('password_hash', item['seller'])
+
+        second_page = self._request({'type': 'ALL', 'page': '2', 'page_size': '2'})
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(
+            [item['listing_id'] for item in second_page.data['results']],
+            [self.other_sale.id],
+        )
+        self.assertIsNotNone(second_page.data['previous'])
+        self.assertIsNone(second_page.data['next'])
+
+    def test_public_type_filters_return_only_the_requested_listing_kind(self):
+        for kind, expected_id in (('SALE', 101), ('BORROW', 102)):
+            with self.subTest(kind=kind):
+                response = self._request({'type': kind})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data['count'], 2 if kind == 'SALE' else 1)
+                self.assertTrue(all(
+                    item['listing_type'] == kind
+                    for item in response.data['results']
+                ))
+                self.assertEqual(response.data['results'][0]['listing_id'], expected_id)
+
+    def test_invalid_public_listing_filter_is_rejected(self):
+        response = self._request({'type': 'DRAFT'})
+        self.assertEqual(response.status_code, 400)
 
 
 class LiteModelMappingTests(SimpleTestCase):
@@ -236,16 +405,30 @@ class LiteModelMappingTests(SimpleTestCase):
 
 class PaymentFeeTests(SimpleTestCase):
     def test_fee_split_uses_vnd_precision(self):
-        result = calculate_payment_split('100000', '0.05')
+        result = calculate_payment_split('100000', '0.10')
+        self.assertEqual(result['subtotal'], 100000)
         self.assertEqual(result['amount'], 100000)
-        self.assertEqual(result['platform_fee'], 5000)
-        self.assertEqual(result['seller_amount'], 95000)
+        self.assertEqual(result['platform_fee'], 10000)
+        self.assertEqual(result['seller_amount'], 90000)
+        self.assertEqual(
+            calculate_payment_split('100000', '0.10'),
+            result,
+        )
 
     def test_fee_rate_must_be_between_zero_and_one(self):
         for rate in ('-0.01', '1.01'):
             with self.subTest(rate=rate):
                 with self.assertRaises(ValidationError):
                     calculate_payment_split('100000', rate)
+
+
+    def test_online_checkout_method_is_accepted(self):
+        serializer = CheckoutInputSerializer(data={
+            'idempotency_key': 'checkout-online-1',
+            'cart_item_id': 1,
+            'payment_method': 'ONLINE',
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
 
 class FavoritePayloadTests(SimpleTestCase):
@@ -314,6 +497,197 @@ class LegacyBookInputCompatibilityTests(SimpleTestCase):
         for field in ('max_days', 'shipping_paid_by', 'return_method'):
             self.assertIn(field, serializer.errors)
 
+    def test_book_detail_metadata_can_be_entered_on_a_listing(self):
+        serializer = BookWriteSerializer(data={
+            'title': 'Complete detail metadata',
+            'price': '100000',
+            'condition_status': 'good',
+            'author': 'A. Writer',
+            'publisher': 'Campus Press',
+            'isbn': '9781234567890',
+            'condition_description': 'Notes and cover are in good condition.',
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['author'], 'A. Writer')
+        self.assertEqual(serializer.validated_data['publisher'], 'Campus Press')
+        self.assertEqual(serializer.validated_data['isbn'], '9781234567890')
+        self.assertEqual(
+            serializer.validated_data['condition_description'],
+            'Notes and cover are in good condition.',
+        )
+
+
+class BookImageManifestValidationTests(SimpleTestCase):
+    @patch('books.serializers.verify_cloudinary_image')
+    def test_single_image_becomes_primary_and_sort_order_starts_at_zero(self, verify):
+        serializer = BookWriteSerializer(
+            data={
+                'title': 'Single image listing',
+                'price': '100000',
+                'condition_status': 'good',
+                'images': [{
+                    'image_url': 'https://res.cloudinary.com/demo/image/upload/book.jpg',
+                    'cloudinary_public_id': f'user-8-{"a" * 32}',
+                    'sort_order': 7,
+                }],
+            },
+            context={'request': SimpleNamespace(user=SimpleNamespace(id=8))},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        image = serializer.validated_data['images'][0]
+        self.assertTrue(image['is_primary'])
+        self.assertEqual(image['sort_order'], 0)
+        verify.assert_called_once()
+
+    @patch('books.serializers.verify_cloudinary_image')
+    def test_multi_image_manifest_uses_array_order_and_one_selected_primary(self, verify):
+        serializer = BookWriteSerializer(
+            data={
+                'title': 'Multi image listing',
+                'price': '100000',
+                'condition_status': 'good',
+                'images': [
+                    {
+                        'image_url': 'https://res.cloudinary.com/demo/image/upload/a.jpg',
+                        'cloudinary_public_id': f'user-8-{"a" * 32}',
+                        'sort_order': 9,
+                    },
+                    {
+                        'image_url': 'https://res.cloudinary.com/demo/image/upload/b.jpg',
+                        'cloudinary_public_id': f'user-8-{"b" * 32}',
+                        'is_primary': True,
+                        'sort_order': 9,
+                    },
+                    {
+                        'image_url': 'https://res.cloudinary.com/demo/image/upload/c.jpg',
+                        'cloudinary_public_id': f'user-8-{"c" * 32}',
+                        'sort_order': 0,
+                    },
+                ],
+            },
+            context={'request': SimpleNamespace(user=SimpleNamespace(id=8))},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        images = serializer.validated_data['images']
+        self.assertEqual([image['sort_order'] for image in images], [0, 1, 2])
+        self.assertEqual(
+            [image['is_primary'] for image in images],
+            [False, True, False],
+        )
+        self.assertEqual(verify.call_count, 3)
+
+    def test_manifest_allows_no_image_and_rejects_more_than_ten_images(self):
+        no_image = BookWriteSerializer(data={
+            'title': 'No image listing',
+            'price': '100000',
+            'condition_status': 'good',
+        })
+        self.assertTrue(no_image.is_valid(), no_image.errors)
+
+        too_many = BookWriteSerializer(data={
+            'title': 'Too many images',
+            'price': '100000',
+            'condition_status': 'good',
+            'images': [
+                {
+                    'image_url': f'https://images.example.invalid/{index}.jpg',
+                    'cloudinary_public_id': f'user-8-{index:032x}',
+                }
+                for index in range(11)
+            ],
+        })
+        self.assertFalse(too_many.is_valid())
+        self.assertIn('images', too_many.errors)
+
+    def test_existing_image_ids_cannot_be_included_on_create(self):
+        serializer = BookWriteSerializer(data={
+            'title': 'Forged existing image',
+            'price': '100000',
+            'condition_status': 'good',
+            'images': [{
+                'id': 42,
+                'image_url': 'https://images.example.invalid/book.jpg',
+                'cloudinary_public_id': f'user-8-{"a" * 32}',
+            }],
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('images', serializer.errors)
+
+
+class CloudinaryImageValidationTests(SimpleTestCase):
+    @override_settings(
+        CLOUDINARY_CLOUD_NAME='test-cloud',
+        CLOUDINARY_API_KEY='test-key',
+        CLOUDINARY_API_SECRET='test-secret',
+    )
+    @patch('config.cloudinary.urllib.request.urlopen')
+    def test_server_validates_cloudinary_format_size_and_url(self, urlopen):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            'public_id': f'user-8-{"a" * 32}',
+            'secure_url': 'https://res.cloudinary.com/test-cloud/image/upload/book.jpg',
+            'format': 'jpg',
+            'bytes': 1024,
+        }).encode()
+        urlopen.return_value = response
+
+        verify_cloudinary_image(
+            user_id=8,
+            image_url='https://res.cloudinary.com/test-cloud/image/upload/book.jpg',
+            public_id=f'user-8-{"a" * 32}',
+        )
+
+        request = urlopen.call_args.args[0]
+        self.assertIn('/resources/image/upload/', request.full_url)
+        self.assertTrue(request.get_header('Authorization').startswith('Basic '))
+
+    @override_settings(
+        CLOUDINARY_CLOUD_NAME='test-cloud',
+        CLOUDINARY_API_KEY='test-key',
+        CLOUDINARY_API_SECRET='test-secret',
+    )
+    @patch('config.cloudinary.urllib.request.urlopen')
+    def test_server_rejects_disallowed_format_and_oversized_image(self, urlopen):
+        for image_format, byte_count in (('pdf', 1024), ('jpg', 10 * 1024 * 1024 + 1)):
+            with self.subTest(image_format=image_format, byte_count=byte_count):
+                response = MagicMock()
+                response.__enter__.return_value.read.return_value = json.dumps({
+                    'public_id': f'user-8-{"a" * 32}',
+                    'secure_url': 'https://res.cloudinary.com/test-cloud/image/upload/book.jpg',
+                    'format': image_format,
+                    'bytes': byte_count,
+                }).encode()
+                urlopen.return_value = response
+
+                with self.assertRaises(ValidationError):
+                    verify_cloudinary_image(
+                        user_id=8,
+                        image_url='https://res.cloudinary.com/test-cloud/image/upload/book.jpg',
+                        public_id=f'user-8-{"a" * 32}',
+                    )
+
+    def test_upload_public_id_must_be_owned_by_the_authenticated_user(self):
+        with self.assertRaises(ValidationError):
+            verify_cloudinary_image(
+                user_id=8,
+                image_url='https://res.cloudinary.com/test-cloud/image/upload/book.jpg',
+                public_id=f'user-9-{"a" * 32}',
+            )
+
+
+class BookImageOwnershipTests(SimpleTestCase):
+    def test_user_cannot_upload_images_to_another_users_book(self):
+        request = SimpleNamespace(
+            user=SimpleNamespace(id=8, is_authenticated=True),
+        )
+        book = SimpleNamespace(id=32, owner_id=9, status='AVAILABLE')
+        with patch('books.api_views.get_object_or_404', return_value=book):
+            with self.assertRaises(PermissionDenied):
+                BookImageListView._get_editable_book(request, 32)
+
 
 class BuyBorrowSeparationTests(SimpleTestCase):
     def test_cart_rejects_borrow_listing_type(self):
@@ -361,6 +735,53 @@ class ReservationApiValidationTests(SimpleTestCase):
                     request,
                     book_id=6,
                 )
+
+
+class CheckoutPhoneVerificationTests(SimpleTestCase):
+    def test_checkout_does_not_require_phone_otp_or_trust_client_verification_flag(self):
+        buyer = SimpleNamespace(id=42, is_authenticated=True, phone='+15550001111')
+        serializer = Mock(validated_data={'idempotency_key': 'checkout-once'})
+        serializer.is_valid.return_value = None
+        request = SimpleNamespace(
+            data={'phone_verified': False},
+            user=buyer,
+        )
+        checkout_manager = Mock()
+        checkout_manager.filter.return_value.first.return_value = None
+        cart_manager = Mock()
+        cart_manager.select_for_update.return_value.filter.return_value.first.return_value = None
+        order_manager = Mock()
+        payment_manager = Mock()
+
+        with patch(
+            'books.commerce_api_views.CheckoutInputSerializer',
+            return_value=serializer,
+        ), patch.object(
+            CheckoutGroup,
+            'objects',
+            checkout_manager,
+        ), patch(
+            'books.commerce_api_views.Cart.objects',
+            cart_manager,
+        ), patch.object(
+            Order,
+            'objects',
+            order_manager,
+        ), patch.object(
+            Payment,
+            'objects',
+            payment_manager,
+        ):
+            with self.assertRaisesMessage(
+                ValidationError,
+                'Giỏ hàng không còn hoạt động; hãy tải lại giỏ hàng.',
+            ):
+                CheckoutView.post.__wrapped__(CheckoutView(), request)
+
+        cart_manager.select_for_update.assert_called_once()
+        checkout_manager.create.assert_not_called()
+        order_manager.create.assert_not_called()
+        payment_manager.create.assert_not_called()
 
 
 class BookListPayloadTests(SimpleTestCase):
@@ -448,7 +869,9 @@ class LendListingPayloadTests(SimpleTestCase):
         image = SimpleNamespace(
             id=8,
             image_url='https://images.example.invalid/book.jpg',
+            cloudinary_public_id=None,
             is_primary=True,
+            sort_order=0,
         )
         work = SimpleNamespace(
             id=44,
@@ -464,10 +887,12 @@ class LendListingPayloadTests(SimpleTestCase):
             publication_year=2024,
             publisher_name='Example Press',
             language=SimpleNamespace(id=1, name='English', code='en'),
+            identifiers=SimpleNamespace(all=lambda: []),
         )
         book = SimpleNamespace(
             id=12,
             book_edition=edition,
+            status='AVAILABLE',
             condition_status='good',
             condition_label='GOOD',
             condition_description='Lightly used',
@@ -481,6 +906,10 @@ class LendListingPayloadTests(SimpleTestCase):
                 full_name='Lender',
                 university_id=6,
                 university=SimpleNamespace(name='Example University'),
+                faculty_id=None,
+                faculty=None,
+                major_id=None,
+                major=None,
             ),
             book=book,
             title='Borrowable textbook',
@@ -492,16 +921,42 @@ class LendListingPayloadTests(SimpleTestCase):
             created_at=timezone.now(),
             buying_intent_count=4,
             selling_intent_count=1,
+            listing_reviews=[],
         )
         payload = lend_listing_payload(listing)
         self.assertEqual(payload['primary_image'], image.image_url)
+        self.assertEqual(
+            payload['images'],
+            [{
+                'id': image.id,
+                'image_url': image.image_url,
+                'cloudinary_public_id': image.cloudinary_public_id,
+                'is_primary': True,
+                'sort_order': 0,
+            }],
+        )
         self.assertEqual(payload['condition_status'], 'good')
+        self.assertEqual(payload['status'], 'ACTIVE')
+        self.assertEqual(payload['book']['status'], 'available')
         self.assertEqual(payload['subject']['code'], 'PHY101')
         self.assertEqual(
             payload['book']['seller']['university']['name'],
             'Example University',
         )
         self.assertEqual(payload['buying_intent_count'], 4)
+        for listing_status, book_status, expected_status in (
+            ('ACTIVE', 'AVAILABLE', 'available'),
+            ('RESERVED', 'RESERVED', 'reserved'),
+            ('ON_LOAN', 'ON_LOAN', 'on_loan'),
+            ('EXPIRED', 'AVAILABLE', 'hidden'),
+        ):
+            with self.subTest(listing_status=listing_status, book_status=book_status):
+                listing.status = listing_status
+                book.status = book_status
+                self.assertEqual(
+                    lend_listing_payload(listing)['book']['status'],
+                    expected_status,
+                )
 
 
 class AdminCoverageTests(SimpleTestCase):
@@ -643,6 +1098,33 @@ class BookOwnershipEndpointTests(SimpleTestCase):
                 self.other_owner_book.save.assert_not_called()
 
 
+class PendingBookDetailAccessTests(SimpleTestCase):
+    @patch('books.api_views.BookSerializer')
+    @patch('books.api_views.optimized_books_queryset')
+    def test_owner_can_view_own_pending_book_detail(self, optimized_queryset, serializer_class):
+        user = SimpleNamespace(id=10, is_authenticated=True)
+        book = SimpleNamespace(id=32)
+        queryset = Mock()
+        queryset.filter.return_value = queryset
+        queryset.first.return_value = book
+        optimized_queryset.return_value = queryset
+        serializer_class.return_value.data = {'id': book.id, 'images': []}
+        request = APIRequestFactory().get('/api/books/32/')
+        force_authenticate(request, user=user)
+
+        response = BookDetailView.as_view()(request, pk=book.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'id': book.id, 'images': []})
+        optimized_queryset.assert_called_once_with(include_history=True)
+        queryset.filter.assert_called_once_with(
+            owner_id=user.id,
+            status='AVAILABLE',
+            sale_listings__status='PENDING',
+            pk=book.id,
+        )
+
+
 class SaleListingInputTests(SimpleTestCase):
     def test_client_cannot_choose_moderation_or_marketplace_status(self):
         for unsafe_status in ('PENDING', 'ACTIVE', 'REJECTED', 'RESERVED', 'SOLD'):
@@ -732,6 +1214,7 @@ class ReservationAuthorizationTests(SimpleTestCase):
         )
         listing = SimpleNamespace(
             status='RESERVED',
+            expires_at=now + timedelta(days=1),
             updated_at=None,
             save=Mock(),
         )
@@ -770,6 +1253,104 @@ class ReservationAuthorizationTests(SimpleTestCase):
         self.assertEqual(listing.status, 'ACTIVE')
         self.assertEqual(book.status, 'AVAILABLE')
         create_borrow_order.assert_not_called()
+
+    def test_rejected_pending_borrow_reopens_unexpired_listing(self):
+        now = timezone.now()
+        book = SimpleNamespace(
+            id=5,
+            status='RESERVED',
+            updated_at=None,
+            sale_listings=Mock(),
+            save=Mock(),
+        )
+        reservation = SimpleNamespace(
+            id=14,
+            book_id=5,
+            book=book,
+            status='PENDING',
+            expires_at=now + timedelta(hours=1),
+            owner_id=7,
+            requester_id=8,
+            updated_at=None,
+            save=Mock(),
+        )
+        listing = SimpleNamespace(
+            status='RESERVED',
+            expires_at=now + timedelta(days=1),
+            updated_at=None,
+            save=Mock(),
+        )
+        reservation_manager = Mock()
+        reservation_manager.select_for_update.return_value.get.return_value = reservation
+        book_manager = Mock()
+        book_manager.select_for_update.return_value.get.return_value = book
+        lend_manager = Mock()
+        lend_manager.select_for_update.return_value.filter.return_value.order_by.return_value.first.return_value = listing
+
+        with patch.object(BookReservation, 'objects', reservation_manager), patch(
+            'books.services.Book.objects',
+            book_manager,
+        ), patch('books.services.LendListing.objects', lend_manager), patch(
+            'books.services._notify',
+        ):
+            rejected = transition_reservation.__wrapped__(
+                reservation.id,
+                SimpleNamespace(id=7),
+                'reject',
+            )
+
+        self.assertEqual(rejected.status, 'REJECTED')
+        self.assertEqual(listing.status, 'ACTIVE')
+        self.assertEqual(book.status, 'AVAILABLE')
+
+    def test_return_does_not_reopen_an_expired_lend_listing(self):
+        now = timezone.now()
+        book = SimpleNamespace(
+            id=5,
+            status='ON_LOAN',
+            updated_at=None,
+            sale_listings=Mock(),
+            save=Mock(),
+        )
+        reservation = SimpleNamespace(
+            id=14,
+            book_id=5,
+            book=book,
+            status='CONFIRMED',
+            expires_at=now + timedelta(hours=1),
+            owner_id=7,
+            requester_id=8,
+            updated_at=None,
+            save=Mock(),
+        )
+        listing = SimpleNamespace(
+            status='ON_LOAN',
+            expires_at=now - timedelta(seconds=1),
+            updated_at=None,
+            save=Mock(),
+        )
+        reservation_manager = Mock()
+        reservation_manager.select_for_update.return_value.get.return_value = reservation
+        book_manager = Mock()
+        book_manager.select_for_update.return_value.get.return_value = book
+        lend_manager = Mock()
+        lend_manager.select_for_update.return_value.filter.return_value.order_by.return_value.first.return_value = listing
+
+        with patch.object(BookReservation, 'objects', reservation_manager), patch(
+            'books.services.Book.objects',
+            book_manager,
+        ), patch('books.services.LendListing.objects', lend_manager), patch(
+            'books.services._notify',
+        ):
+            completed = transition_reservation.__wrapped__(
+                reservation.id,
+                SimpleNamespace(id=8),
+                'complete',
+            )
+
+        self.assertEqual(completed.status, 'COMPLETED')
+        self.assertEqual(listing.status, 'EXPIRED')
+        self.assertEqual(book.status, 'AVAILABLE')
 
     def test_outsider_cannot_trigger_expiration_side_effects(self):
         now = timezone.now()
@@ -920,7 +1501,10 @@ class PaymentInputSecurityTests(SimpleTestCase):
             id=31,
             buyer_id=buyer.id,
             seller_id=20,
-            total_amount=Decimal('125.5000'),
+            order_type='SALE',
+            status='PENDING_PAYMENT',
+            subtotal=Decimal('125.5000'),
+            total_amount=Decimal('138.0500'),
             currency='VND',
             checkout_group=SimpleNamespace(id=4),
         )
@@ -928,11 +1512,17 @@ class PaymentInputSecurityTests(SimpleTestCase):
             id=71,
             order_id=order.id,
             amount=Decimal('125.5000'),
+            payment_method='CARD',
+            provider='fake',
+            provider_transaction_code='fake_ref',
             platform_fee_rate=Decimal('0'),
             platform_fee=Decimal('0'),
             seller_amount=Decimal('125.5000'),
+            currency='VND',
             status='PENDING',
             paid_at=None,
+            created_at=None,
+            updated_at=None,
         )
         payment_manager = Mock()
         payment_manager.get_or_create.return_value = (payment, True)
@@ -960,6 +1550,8 @@ class PaymentInputSecurityTests(SimpleTestCase):
             'books.commerce_api_views.get_object_or_404',
             return_value=order,
         ), patch.object(Payment, 'objects', payment_manager), patch(
+            'books.commerce_api_views.Order.objects.select_for_update',
+        ) as order_lock, patch(
             'books.commerce_api_views.timezone.now',
         ), patch(
             'books.commerce_api_views.get_payment_provider',
@@ -975,7 +1567,7 @@ class PaymentInputSecurityTests(SimpleTestCase):
         values = payment_manager.get_or_create.call_args.kwargs['defaults']
         self.assertEqual(values['amount'], order.total_amount)
         self.assertEqual(values['status'], 'PENDING')
-        self.assertEqual(values['seller_amount'], order.total_amount)
+        self.assertEqual(values['seller_amount'], order.subtotal)
         self.assertTrue(values['provider_transaction_code'].startswith('fake_'))
 
     def test_fake_payment_intent_is_idempotent_and_transitions_use_project_statuses(self):
@@ -993,6 +1585,14 @@ class PaymentInputSecurityTests(SimpleTestCase):
         )
         with self.assertRaises(ValidationError):
             provider.transition('PAID', 'FAILED')
+        for current, target in (
+            ('FAILED', 'PAID'),
+            ('CANCELLED', 'PAID'),
+            ('REFUNDED', 'PAID'),
+        ):
+            with self.subTest(current=current, target=target):
+                with self.assertRaises(ValidationError):
+                    provider.transition(current, target)
 
     def test_fake_payment_provider_cannot_be_enabled_in_production(self):
         with patch('books.services.settings.PASSBOOK_ENVIRONMENT', 'production'), patch(
@@ -1046,7 +1646,12 @@ class PaymentInputSecurityTests(SimpleTestCase):
         ), patch(
             'books.services.get_object_or_404',
             return_value=payment,
-        ):
+        ), patch(
+            'books.services.notify_order_status_changed',
+        ), patch(
+            'books.services.SaleOrderItem.objects.select_for_update',
+        ) as sale_items:
+            sale_items.return_value.filter.return_value.select_related.return_value = []
             result = transition_fake_payment.__wrapped__(71, 'PAID')
 
         self.assertIs(result, payment)
@@ -1278,3 +1883,481 @@ class BorrowOrderAuthorizationTests(SimpleTestCase):
 
         self.assertEqual(return_record.status, 'REQUESTED')
         return_record.save.assert_not_called()
+
+
+class BorrowReturnFlowTests(SimpleTestCase):
+    def test_return_request_url_precedes_generic_borrow_action_route(self):
+        match = resolve('/api/borrow-orders/7/return-request/')
+        self.assertIs(
+            match.func.view_class,
+            BorrowOrderReturnRequestView,
+        )
+
+    def _borrow_order(self, *, status='ACTIVE', return_status=None):
+        book = SimpleNamespace(
+            id=5,
+            status='ON_LOAN',
+            updated_at=None,
+            save=Mock(),
+        )
+        listing = SimpleNamespace(
+            id=6,
+            book_id=book.id,
+            book=book,
+            status='ON_LOAN',
+            expires_at=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        order = SimpleNamespace(
+            id=4,
+            status='PAID',
+            completed_at=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        return SimpleNamespace(
+            id=7,
+            order_id=order.id,
+            order=order,
+            lend_listing_id=listing.id,
+            lend_listing=listing,
+            borrower_id=12,
+            lender_id=13,
+            status=status,
+            return_status=return_status,
+            return_tracking_code=None,
+            return_method=None,
+            return_requested_by=None,
+            return_requested_at=None,
+            return_approved_at=None,
+            return_notes=None,
+            actual_return_at=None,
+            updated_at=None,
+            save=Mock(),
+        )
+
+    def _locked_borrow_manager(self, borrow):
+        queryset = Mock()
+        queryset.select_related.return_value = queryset
+        queryset.get.return_value = borrow
+        manager = Mock()
+        manager.select_for_update.return_value = queryset
+        return manager
+
+    @staticmethod
+    def _drf_request(view_class, request, user):
+        force_authenticate(request, user=user)
+        return view_class().initialize_request(request)
+
+    def test_return_request_creates_one_return_shipment_for_borrower(self):
+        borrow = self._borrow_order()
+        shipment = SimpleNamespace(
+            id=23,
+            status='PENDING',
+            carrier='Local delivery',
+            tracking_code='RET-123',
+        )
+        factory = APIRequestFactory()
+        request = factory.post(
+            '/api/borrow-orders/7/return-request/',
+            {
+                'return_method': 'DELIVERY',
+                'carrier': 'Local delivery',
+                'return_tracking_code': 'RET-123',
+                'return_notes': 'Leave with owner',
+            },
+            format='json',
+        )
+        request = self._drf_request(
+            BorrowOrderReturnRequestView,
+            request,
+            SimpleNamespace(id=borrow.borrower_id, is_authenticated=True),
+        )
+
+        with patch(
+            'books.commerce_api_views.BorrowOrder.objects',
+            self._locked_borrow_manager(borrow),
+        ), patch('books.commerce_api_views.get_object_or_404', return_value=borrow), patch(
+            'books.commerce_api_views.Shipment.objects',
+        ) as shipment_manager, patch(
+            'books.commerce_api_views.ShipmentTracking.objects',
+        ) as tracking_manager:
+            shipment_manager.filter.return_value.exists.return_value = False
+            shipment_manager.create.return_value = shipment
+            response = BorrowOrderReturnRequestView.post.__wrapped__(
+                BorrowOrderReturnRequestView(),
+                request,
+                borrow_order_id=borrow.id,
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['shipment']['direction'], 'BORROWER_TO_OWNER')
+        self.assertEqual(borrow.status, 'RETURN_REQUESTED')
+        self.assertEqual(borrow.return_status, 'SHIPPING')
+        self.assertEqual(borrow.return_tracking_code, 'RET-123')
+        shipment_manager.create.assert_called_once()
+        self.assertEqual(
+            shipment_manager.create.call_args.kwargs['order'],
+            borrow.order,
+        )
+        self.assertEqual(
+            shipment_manager.create.call_args.kwargs['shipping_fee'],
+            Decimal('0'),
+        )
+        self.assertEqual(
+            tracking_manager.create.call_args.kwargs['status'],
+            'PENDING',
+        )
+
+    def test_owner_and_outsider_cannot_create_return(self):
+        for user_id in (13, 99):
+            with self.subTest(user_id=user_id):
+                borrow = self._borrow_order()
+                request = APIRequestFactory().post(
+                    '/api/borrow-orders/7/return-request/',
+                    {
+                        'return_method': 'DELIVERY',
+                        'carrier': 'Local delivery',
+                        'return_tracking_code': 'RET-123',
+                    },
+                    format='json',
+                )
+                request = self._drf_request(
+                    BorrowOrderReturnRequestView,
+                    request,
+                    SimpleNamespace(id=user_id, is_authenticated=True),
+                )
+                with patch(
+                    'books.commerce_api_views.get_object_or_404',
+                    return_value=borrow,
+                ), patch(
+                    'books.commerce_api_views.Shipment.objects.create',
+                ) as create_shipment:
+                    with self.assertRaises(PermissionDenied):
+                        BorrowOrderReturnRequestView.post.__wrapped__(
+                            BorrowOrderReturnRequestView(),
+                            request,
+                            borrow_order_id=borrow.id,
+                        )
+                create_shipment.assert_not_called()
+
+    def test_duplicate_return_request_does_not_create_another_shipment(self):
+        borrow = self._borrow_order(status='RETURN_REQUESTED', return_status='SHIPPING')
+        request = APIRequestFactory().post(
+            '/api/borrow-orders/7/return-request/',
+            {
+                'return_method': 'DELIVERY',
+                'carrier': 'Local delivery',
+                'return_tracking_code': 'RET-123',
+            },
+            format='json',
+        )
+        request = self._drf_request(
+            BorrowOrderReturnRequestView,
+            request,
+            SimpleNamespace(id=borrow.borrower_id, is_authenticated=True),
+        )
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=borrow,
+        ), patch(
+            'books.commerce_api_views.Shipment.objects.create',
+        ) as create_shipment:
+            with self.assertRaises(ValidationError):
+                BorrowOrderReturnRequestView.post.__wrapped__(
+                    BorrowOrderReturnRequestView(),
+                    request,
+                    borrow_order_id=borrow.id,
+                )
+        create_shipment.assert_not_called()
+
+    def test_delivered_tracking_moves_borrow_to_received_waiting_confirmation(self):
+        borrow = self._borrow_order(status='RETURN_REQUESTED', return_status='SHIPPING')
+        borrow.return_tracking_code = 'RET-123'
+        occurred_at = timezone.now()
+        shipment = SimpleNamespace(
+            id=23,
+            order_id=borrow.order_id,
+            tracking_code='RET-123',
+            status='IN_TRANSIT',
+            shipped_at=occurred_at - timedelta(hours=1),
+            delivered_at=None,
+            updated_at=None,
+            save=Mock(),
+            tracking_events=Mock(),
+        )
+        shipment.tracking_events.order_by.return_value.first.return_value = SimpleNamespace(
+            occurred_at=occurred_at - timedelta(hours=1),
+        )
+        manager = Mock()
+        manager.select_for_update.return_value.filter.return_value.first.return_value = borrow
+        request = APIRequestFactory().post(
+            '/api/shipments/23/tracking/',
+            {'status': 'DELIVERED'},
+            format='json',
+        )
+        request = self._drf_request(
+            ShipmentTrackingCreateView,
+            request,
+            SimpleNamespace(id=borrow.borrower_id, is_authenticated=True),
+        )
+
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=shipment,
+        ), patch(
+            'books.commerce_api_views.BorrowOrder.objects',
+            manager,
+        ), patch(
+            'books.commerce_api_views.ShipmentTracking.objects.create',
+            return_value=SimpleNamespace(
+                id=29,
+                status='DELIVERED',
+                location=None,
+                description=None,
+                occurred_at=occurred_at,
+            ),
+        ), patch(
+            'books.commerce_api_views.transaction.atomic',
+            side_effect=lambda: nullcontext(),
+        ), patch(
+            'books.commerce_api_views.update_shipment_status',
+            update_shipment_status.__wrapped__,
+        ):
+            response = ShipmentTrackingCreateView.post.__wrapped__(
+                ShipmentTrackingCreateView(),
+                request,
+                shipment_id=shipment.id,
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(shipment.status, 'DELIVERED')
+        self.assertEqual(borrow.status, 'RETURNED')
+        self.assertEqual(borrow.return_status, 'DELIVERED')
+        borrow.save.assert_called_once()
+
+    def test_return_shipment_tracking_follows_pending_picked_up_transit_delivered(self):
+        borrow = self._borrow_order(status='RETURN_REQUESTED', return_status='SHIPPING')
+        borrow.return_tracking_code = 'RET-123'
+        shipment = SimpleNamespace(
+            id=23,
+            order_id=borrow.order_id,
+            tracking_code='RET-123',
+            status='PENDING',
+            shipped_at=None,
+            delivered_at=None,
+            updated_at=None,
+            save=Mock(),
+            tracking_events=Mock(),
+        )
+        previous_event_at = timezone.now() - timedelta(minutes=5)
+        shipment.tracking_events.order_by.return_value.first.return_value = SimpleNamespace(
+            occurred_at=previous_event_at,
+        )
+        factory = APIRequestFactory()
+        for index, tracking_status in enumerate(
+            ('PICKED_UP', 'IN_TRANSIT', 'DELIVERED'),
+            start=1,
+        ):
+            with self.subTest(status=tracking_status):
+                request = self._drf_request(
+                    ShipmentTrackingCreateView,
+                    factory.post(
+                        '/api/shipments/23/tracking/',
+                        {'status': tracking_status},
+                        format='json',
+                    ),
+                    SimpleNamespace(id=borrow.borrower_id, is_authenticated=True),
+                )
+                borrow_manager = Mock()
+                borrow_manager.select_for_update.return_value.filter.return_value.first.return_value = borrow
+                with patch(
+                    'books.commerce_api_views.get_object_or_404',
+                    return_value=shipment,
+                ), patch(
+                    'books.commerce_api_views.BorrowOrder.objects',
+                    borrow_manager,
+                ), patch(
+                    'books.commerce_api_views.ShipmentTracking.objects.create',
+                    return_value=SimpleNamespace(
+                        id=30 + index,
+                        status=tracking_status,
+                        location=None,
+                        description=None,
+                        occurred_at=timezone.now(),
+                    ),
+                ), patch(
+                    'books.commerce_api_views.transaction.atomic',
+                    side_effect=lambda: nullcontext(),
+                ), patch(
+                    'books.commerce_api_views.update_shipment_status',
+                    update_shipment_status.__wrapped__,
+                ):
+                    response = ShipmentTrackingCreateView.post.__wrapped__(
+                        ShipmentTrackingCreateView(),
+                        request,
+                        shipment_id=shipment.id,
+                    )
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(shipment.status, tracking_status)
+
+        self.assertEqual(borrow.status, 'RETURNED')
+        self.assertEqual(borrow.return_status, 'DELIVERED')
+
+    def test_return_shipment_rejects_skipping_required_tracking_stages(self):
+        borrow = self._borrow_order(status='RETURN_REQUESTED', return_status='SHIPPING')
+        borrow.return_tracking_code = 'RET-123'
+        shipment = SimpleNamespace(
+            id=23,
+            order_id=borrow.order_id,
+            tracking_code='RET-123',
+            status='PENDING',
+            tracking_events=Mock(),
+        )
+        manager = Mock()
+        manager.select_for_update.return_value.filter.return_value.first.return_value = borrow
+        request = self._drf_request(
+            ShipmentTrackingCreateView,
+            APIRequestFactory().post(
+                '/api/shipments/23/tracking/',
+                {'status': 'DELIVERED'},
+                format='json',
+            ),
+            SimpleNamespace(id=borrow.borrower_id, is_authenticated=True),
+        )
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=shipment,
+        ), patch(
+            'books.commerce_api_views.BorrowOrder.objects',
+            manager,
+        ), patch(
+            'books.commerce_api_views.update_shipment_status',
+            update_shipment_status.__wrapped__,
+        ), patch(
+            'books.commerce_api_views.ShipmentTracking.objects.create',
+        ) as create_event:
+            with self.assertRaises(ValidationError):
+                ShipmentTrackingCreateView.post.__wrapped__(
+                    ShipmentTrackingCreateView(),
+                    request,
+                    shipment_id=shipment.id,
+                )
+        create_event.assert_not_called()
+        self.assertEqual(borrow.status, 'RETURN_REQUESTED')
+
+    def test_untracked_outbound_borrow_shipment_is_not_misclassified_as_return(self):
+        borrow = self._borrow_order(status='ACTIVE')
+        shipment = SimpleNamespace(
+            id=23,
+            order_id=borrow.order_id,
+            tracking_code=None,
+            status='SHIPPED',
+            order=SimpleNamespace(seller_id=None),
+            shipped_at=timezone.now(),
+            delivered_at=None,
+            updated_at=None,
+            save=Mock(),
+            tracking_events=Mock(),
+        )
+        shipment.tracking_events.order_by.return_value.first.return_value = None
+        manager = Mock()
+        manager.select_for_update.return_value.filter.return_value.first.return_value = borrow
+        request = self._drf_request(
+            ShipmentTrackingCreateView,
+            APIRequestFactory().post(
+                '/api/shipments/23/tracking/',
+                {'status': 'IN_TRANSIT'},
+                format='json',
+            ),
+            SimpleNamespace(id=borrow.lender_id, is_authenticated=True),
+        )
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=shipment,
+        ), patch(
+            'books.commerce_api_views.BorrowOrder.objects',
+            manager,
+        ), patch(
+            'books.commerce_api_views.ShipmentTracking.objects.create',
+            return_value=SimpleNamespace(
+                id=31,
+                status='IN_TRANSIT',
+                location=None,
+                description=None,
+                occurred_at=timezone.now(),
+            ),
+        ), patch(
+            'books.commerce_api_views.transaction.atomic',
+            side_effect=lambda: nullcontext(),
+        ), patch(
+            'books.commerce_api_views.update_shipment_status',
+            update_shipment_status.__wrapped__,
+        ):
+            response = ShipmentTrackingCreateView.post.__wrapped__(
+                ShipmentTrackingCreateView(),
+                request,
+                shipment_id=shipment.id,
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(borrow.status, 'ACTIVE')
+        self.assertIsNone(borrow.return_status)
+
+    def test_only_lender_can_confirm_delivered_return_and_reopen_inventory(self):
+        borrow = self._borrow_order(status='RETURNED', return_status='DELIVERED')
+        borrow.return_tracking_code = 'RET-123'
+        manager = self._locked_borrow_manager(borrow)
+        with patch('books.services.BorrowOrder.objects', manager), patch(
+            'books.services.Shipment.objects.filter',
+        ) as shipments, patch('books.services._notify'):
+            shipments.return_value.exists.return_value = True
+            result = transition_borrow_order.__wrapped__(
+                borrow.id,
+                SimpleNamespace(id=borrow.lender_id),
+                'complete',
+            )
+
+        self.assertIs(result, borrow)
+        self.assertEqual(borrow.status, 'COMPLETED')
+        self.assertEqual(borrow.return_status, 'COMPLETED')
+        self.assertEqual(borrow.order.status, 'COMPLETED')
+        self.assertEqual(borrow.lend_listing.status, 'ACTIVE')
+        self.assertEqual(borrow.lend_listing.book.status, 'AVAILABLE')
+
+    def test_borrower_cannot_confirm_and_owner_cannot_complete_undelivered_return(self):
+        for user_id, status, return_status, shipment_exists in (
+            (12, 'RETURNED', 'DELIVERED', True),
+            (13, 'RETURN_REQUESTED', 'SHIPPING', False),
+        ):
+            with self.subTest(user_id=user_id, status=status):
+                borrow = self._borrow_order(
+                    status=status,
+                    return_status=return_status,
+                )
+                borrow.return_tracking_code = 'RET-123'
+                with patch(
+                    'books.services.BorrowOrder.objects',
+                    self._locked_borrow_manager(borrow),
+                ), patch(
+                    'books.services.Shipment.objects.filter',
+                ) as shipments:
+                    shipments.return_value.exists.return_value = shipment_exists
+                    with self.assertRaises((PermissionDenied, ValidationError)):
+                        transition_borrow_order.__wrapped__(
+                            borrow.id,
+                            SimpleNamespace(id=user_id),
+                            'complete',
+                        )
+                self.assertIn(borrow.status, ('RETURNED', 'RETURN_REQUESTED'))
+                borrow.lend_listing.save.assert_not_called()
+                borrow.lend_listing.book.save.assert_not_called()
+
+    def test_return_request_requires_supported_shipping_details(self):
+        serializer = BorrowReturnInputSerializer(data={
+            'return_method': 'PICKUP',
+            'carrier': '',
+            'return_tracking_code': '',
+        })
+        self.assertFalse(serializer.is_valid())

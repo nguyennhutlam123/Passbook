@@ -11,13 +11,13 @@
     <main class="page-shell sell-page">
         <div class="page-intro">
             <span class="eyebrow">Góc người bán</span>
-            <h1>Đăng tin giáo trình</h1>
-            <p class="text-secondary">Chọn bán hoặc cho mượn giáo trình cho sinh viên cùng trường.</p>
+            <h1>Đăng tin sách</h1>
+            <p class="text-secondary">Chọn bán hoặc cho mượn sách cho sinh viên cùng trường.</p>
         </div>
         <form class="sell-form" data-sell-form novalidate>
             <div class="sell-form__grid">
                 <div class="form-group form-group--wide">
-                    <label class="form-label" for="book-title">Tên giáo trình *</label>
+                    <label class="form-label" for="book-title">Tên sách *</label>
                     <input id="book-title" name="title" type="text">
                     <span class="form-error" data-error-for="title"></span>
                 </div>
@@ -47,45 +47,50 @@
                     <input id="book-price" name="price" type="number" min="1" step="1000" required>
                     <span class="form-error" data-error-for="price"></span>
                 </div>
-                <div class="form-group" data-transaction-fields="BORROW" hidden>
-                    <label class="form-label" for="book-rental-fee">Phí mượn (có thể là 0) *</label>
-                    <input id="book-rental-fee" name="rental_fee" type="number" min="0" step="1000">
-                    <span class="form-error" data-error-for="rental_fee"></span>
-                </div>
-                <div class="form-group" data-transaction-fields="BORROW" hidden>
-                    <label class="form-label" for="borrow-max-days">Thời hạn mượn tối đa (ngày) *</label>
-                    <input id="borrow-max-days" name="max_days" type="number" min="1" value="14">
-                    <span class="form-error" data-error-for="max_days"></span>
-                </div>
-                <div class="form-group" data-transaction-fields="BORROW" hidden>
-                    <label class="form-label" for="borrow-deposit">Tiền đặt cọc</label>
-                    <input id="borrow-deposit" name="deposit_amount" type="number" min="0" step="1000">
-                </div>
-                <div class="form-group" data-transaction-fields="BORROW" hidden>
-                    <label class="form-label" for="borrow-late-fee">Phí trễ hạn mỗi ngày</label>
-                    <input id="borrow-late-fee" name="late_fee_per_day" type="number" min="0" step="1000">
-                </div>
-                <div class="form-group" data-transaction-fields="BORROW" hidden>
-                    <label class="form-label" for="borrow-shipping">Bên chịu phí giao nhận *</label>
-                    <select id="borrow-shipping" name="shipping_paid_by">
-                        <option value="BORROWER">Người mượn</option>
-                        <option value="LENDER">Người cho mượn</option>
-                    </select>
-                    <span class="form-error" data-error-for="shipping_paid_by"></span>
-                </div>
-                <div class="form-group" data-transaction-fields="BORROW" hidden>
-                    <label class="form-label" for="borrow-return-method">Cách trả sách *</label>
-                    <select id="borrow-return-method" name="return_method">
-                        <option value="IN_PERSON">Gặp trực tiếp</option>
-                        <option value="POSTAL">Gửi bưu điện</option>
-                    </select>
-                    <span class="form-error" data-error-for="return_method"></span>
-                </div>
-                <div class="form-group form-group--wide" data-transaction-fields="BORROW" hidden>
-                    <label><input type="checkbox" name="deposit_required"> Bắt buộc đặt cọc</label>
-                    <label class="form-label" for="borrow-terms-notes">Ghi chú điều kiện mượn</label>
-                    <textarea id="borrow-terms-notes" name="terms_notes"></textarea>
-                </div>
+                <fieldset class="sell-form__section form-group--wide" data-transaction-fields="BORROW" hidden>
+                    <legend>Mượn sách</legend>
+                    <div class="sell-form__grid">
+                        <div class="form-group">
+                            <label class="form-label" for="book-rental-fee">Phí mượn (có thể là 0) *</label>
+                            <input id="book-rental-fee" name="rental_fee" type="number" min="0" step="1000">
+                            <span class="form-error" data-error-for="rental_fee"></span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="borrow-max-days">Thời hạn mượn tối đa (ngày) *</label>
+                            <input id="borrow-max-days" name="max_days" type="number" min="1" value="14">
+                            <span class="form-error" data-error-for="max_days"></span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="borrow-deposit">Tiền đặt cọc</label>
+                            <input id="borrow-deposit" name="deposit_amount" type="number" min="0" step="1000">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="borrow-late-fee">Phí trễ hạn mỗi ngày</label>
+                            <input id="borrow-late-fee" name="late_fee_per_day" type="number" min="0" step="1000">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="borrow-shipping">Bên chịu phí giao nhận *</label>
+                            <select id="borrow-shipping" name="shipping_paid_by">
+                                <option value="BORROWER">Người mượn</option>
+                                <option value="LENDER">Người cho mượn</option>
+                            </select>
+                            <span class="form-error" data-error-for="shipping_paid_by"></span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="borrow-return-method">Cách trả sách *</label>
+                            <select id="borrow-return-method" name="return_method">
+                                <option value="IN_PERSON">Gặp trực tiếp</option>
+                                <option value="POSTAL">Gửi bưu điện</option>
+                            </select>
+                            <span class="form-error" data-error-for="return_method"></span>
+                        </div>
+                        <div class="form-group form-group--wide">
+                            <label><input type="checkbox" name="deposit_required"> Bắt buộc đặt cọc</label>
+                            <label class="form-label" for="borrow-terms-notes">Ghi chú điều kiện mượn</label>
+                            <textarea id="borrow-terms-notes" name="terms_notes"></textarea>
+                        </div>
+                    </div>
+                </fieldset>
                 <div class="form-group">
                     <label class="form-label" for="book-condition">Tình trạng *</label>
                     <select id="book-condition" name="condition">
@@ -99,8 +104,24 @@
                     <input id="book-edition" name="edition" type="text">
                 </div>
                 <div class="form-group">
+                    <label class="form-label" for="book-author">Tác giả</label>
+                    <input id="book-author" name="author" type="text" maxlength="500">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-publisher">Nhà xuất bản</label>
+                    <input id="book-publisher" name="publisher" type="text" maxlength="255">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="book-isbn">ISBN</label>
+                    <input id="book-isbn" name="isbn" type="text" maxlength="100">
+                </div>
+                <div class="form-group">
                     <label class="form-label" for="book-year">Năm xuất bản</label>
                     <input id="book-year" name="publication_year" type="number" min="1900" max="2100">
+                </div>
+                <div class="form-group form-group--wide">
+                    <label class="form-label" for="book-condition-description">Mô tả tình trạng sách</label>
+                    <textarea id="book-condition-description" name="condition_description"></textarea>
                 </div>
                 <div class="form-group form-group--wide">
                     <label class="form-label" for="book-description">Mô tả *</label>
@@ -108,7 +129,7 @@
                     <span class="form-error" data-error-for="description"></span>
                 </div>
                 <div class="form-group form-group--wide">
-                    <label class="form-label" for="book-image-file">Ảnh giáo trình</label>
+                    <label class="form-label" for="book-image-file">Ảnh sách</label>
                     <input id="book-image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
                     <span class="caption">Chọn tối đa 10 ảnh JPG, PNG, WebP hoặc GIF (tối đa 10 MB mỗi ảnh). Ảnh đầu tiên là ảnh chính mặc định; có thể đổi thứ tự hoặc chọn ảnh khác.</span>
                     <span class="form-error" data-error-for="images"></span>
@@ -120,9 +141,9 @@
         <section class="success-panel" data-sell-success hidden>
             <span class="success-panel__icon" aria-hidden="true">✓</span>
             <h2>Đăng tin thành công!</h2>
-            <p>Giáo trình của bạn đã được tạo.</p>
+            <p>Sách của bạn đã được đăng.</p>
             <div>
-                <a class="button button-primary" href="profile.html">Xem tin đăng</a>
+                <a class="button button-primary" data-sell-detail-link href="profile.html">Xem chi tiết tin đăng</a>
                 <button class="button button-outline" type="button" data-new-listing>Tiếp tục đăng bán</button>
             </div>
         </section>

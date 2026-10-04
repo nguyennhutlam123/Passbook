@@ -35,7 +35,7 @@ class BookRequestInputSerializer(serializers.Serializer):
     )
     category_id = serializers.PrimaryKeyRelatedField(
         source='category',
-        queryset=Category.objects.all(),
+        queryset=Category.objects.filter(status='ACTIVE'),
         required=False,
         allow_null=True,
     )

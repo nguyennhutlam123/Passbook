@@ -4,41 +4,89 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trang cá nhân - PassBook</title>
+    <script>
+        (function () {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                if (params.get("demo") === "1") {
+                    localStorage.setItem("demoProfile", "true");
+                    localStorage.setItem("accessToken", "demo-access-token");
+                    localStorage.setItem("refreshToken", "demo-refresh-token");
+                    localStorage.setItem("currentUser", JSON.stringify({
+                        id: "demo-profile",
+                        name: "Nguyễn Lâm",
+                        email: "lam.passbook@gmail.com",
+                        university: {name: "HCMUE"},
+                        is_verified: true,
+                        role: "USER",
+                        bio: "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.",
+                    }));
+                }
+            } catch (_error) {
+                // Ignore unsupported environments.
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/workspace.css">
+    <link rel="stylesheet" href="css/workspace.css?v=profile-v3">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
     <main class="page-shell profile-page" data-profile-page>
         <section class="profile-header">
-            <span class="profile-avatar avatar">NL</span>
-            <div>
-                <h1 data-profile-name>Nguyễn Lâm <span class="verified">✓</span></h1>
-                <p data-profile-school>HCMUE</p>
-                <p class="caption">MSSV: <span data-profile-student-id>********</span></p>
+            <div class="profile-avatar avatar" data-profile-avatar aria-hidden="true">NL</div>
+            <div id="profile-overview" class="profile-overview">
+                <div class="profile-badges">
+                    <span class="profile-badge">Tài khoản cá nhân</span>
+                    <span class="profile-badge profile-badge--active">Đang hoạt động</span>
+                </div>
+                <p class="caption">Thành viên PassBook</p>
+                <h1 class="profile-title"><span data-profile-name>Người dùng mới</span><span class="verified" hidden><span aria-hidden="true">✓</span><span>Đã xác minh</span></span></h1>
+                <div class="profile-meta" aria-label="Thông tin cá nhân">
+                    <p class="profile-meta__item"><span class="profile-meta__label">Trường</span><span data-profile-school>Chưa cập nhật trường học</span></p>
+                    <p class="profile-meta__item"><span class="profile-meta__label">Email</span><span data-profile-email>Chưa cập nhật email</span></p>
+                </div>
+                <p class="profile-bio" data-profile-bio>Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.</p>
             </div>
         </section>
-        <section class="profile-listings">
-            <div class="section-heading"><div><span class="eyebrow">Tài khoản</span><h2>Thông tin cá nhân</h2></div></div>
-            <form class="workspace-checkout" data-profile-form>
-                <label class="form-label" for="profile-name">Họ tên</label>
-                <input class="form-control" id="profile-name" name="name" maxlength="150" required>
-                <label class="form-label" for="profile-avatar">Ảnh đại diện (HTTPS URL)</label>
-                <input class="form-control" id="profile-avatar" name="avatar" type="url">
-                <button class="button button-primary" type="submit">Lưu hồ sơ</button>
-            </form>
-            <form class="workspace-checkout" data-password-form>
-                <h3>Đổi mật khẩu</h3>
-                <label class="form-label" for="old-password">Mật khẩu hiện tại</label>
-                <input class="form-control" id="old-password" name="old_password" type="password" autocomplete="current-password" required>
-                <label class="form-label" for="new-password">Mật khẩu mới</label>
-                <input class="form-control" id="new-password" name="new_password" type="password" minlength="8" autocomplete="new-password" required>
-                <button class="button button-outline" type="submit">Đổi mật khẩu</button>
-            </form>
+        <section class="profile-section">
+            <div class="section-heading profile-section__heading"><div><span class="eyebrow">Tài khoản</span><h2>Thông tin cá nhân</h2></div></div>
+            <div class="profile-account-grid">
+                <form class="workspace-checkout profile-card" data-profile-form>
+                    <div>
+                        <h3>Hồ sơ của bạn</h3>
+                        <p class="caption">Cập nhật tên hiển thị và ảnh đại diện.</p>
+                    </div>
+                    <label class="form-label" for="profile-name">Họ tên</label>
+                    <input class="form-control" id="profile-name" name="name" maxlength="150" required>
+                    <div class="profile-avatar-picker">
+                        <div class="profile-avatar-picker__preview avatar" data-avatar-picker-preview aria-hidden="true">NL</div>
+                        <div>
+                            <label class="button button-outline profile-upload-button" for="profile-avatar">Chọn ảnh từ thiết bị</label>
+                            <input class="profile-file-input" id="profile-avatar" name="avatar_file" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+                            <p class="caption">JPG, PNG, WebP hoặc GIF · tối đa 10 MB</p>
+                        </div>
+                    </div>
+                    <p class="profile-upload-message caption" data-avatar-message aria-live="polite"></p>
+                    <button class="button button-primary" type="submit">Lưu thay đổi</button>
+                </form>
+                <form class="workspace-checkout profile-card" data-password-form>
+                    <div>
+                        <h3>Bảo mật tài khoản</h3>
+                        <p class="caption">Chọn mật khẩu mạnh và không dùng lại mật khẩu cũ.</p>
+                    </div>
+                    <label class="form-label" for="old-password">Mật khẩu hiện tại</label>
+                    <input class="form-control" id="old-password" name="old_password" type="password" autocomplete="current-password" required>
+                    <label class="form-label" for="new-password">Mật khẩu mới</label>
+                    <input class="form-control" id="new-password" name="new_password" type="password" minlength="8" autocomplete="new-password" required>
+                    <button class="button button-outline" type="submit">Đổi mật khẩu</button>
+                </form>
+            </div>
         </section>
-        <section class="profile-listings">
-            <div class="section-heading"><div><span class="eyebrow">Giao hàng</span><h2>Địa chỉ của tôi</h2></div></div>
-            <form class="workspace-checkout" data-address-form>
+        <section class="profile-section">
+            <div class="section-heading profile-section__heading"><div><span class="eyebrow">Giao hàng</span><h2>Địa chỉ của tôi</h2><p class="caption">Quản lý nơi nhận sách khi mua sắm.</p></div></div>
+            <div class="profile-address-grid" data-address-grid>
+            <form class="workspace-checkout profile-card" data-address-form>
                 <input type="hidden" name="id">
                 <label class="form-label" for="address-recipient">Người nhận</label>
                 <input class="form-control" id="address-recipient" name="recipient_name" maxlength="150" required>
@@ -54,31 +102,26 @@
                 <input class="form-control" id="address-city" name="city" maxlength="150" required>
                 <label class="form-label" for="address-postal">Mã bưu chính (không bắt buộc)</label>
                 <input class="form-control" id="address-postal" name="postal_code" maxlength="30">
-                <label><input name="is_default" type="checkbox"> Địa chỉ mặc định</label>
+                <label class="profile-default-address"><input name="is_default" type="checkbox"> <span>Đặt làm địa chỉ mặc định</span></label>
                 <button class="button button-primary" type="submit">Lưu địa chỉ</button>
                 <button class="button button-outline" type="reset" data-address-reset>Nhập địa chỉ mới</button>
             </form>
-            <div class="report-list" data-address-list></div>
-        </section>
-        <section class="profile-listings">
-            <div class="section-heading"><div><span class="eyebrow">Trao đổi</span><h2>Cuộc hội thoại</h2></div></div>
-            <div class="conversation-list" data-conversation-list><p class="caption">Đang tải...</p></div>
-        </section>
-        <section class="profile-listings">
-            <div class="section-heading"><div><span class="eyebrow">An toàn</span><h2>Báo cáo của tôi</h2></div></div>
-            <div class="report-list" data-report-list><p class="caption">Đang tải...</p></div>
-        </section>
-        <section class="profile-listings">
-            <div class="section-heading">
-                <div><span class="eyebrow">Quản lý</span><h2>Tin đăng của tôi</h2></div>
+            <div class="profile-address-list" data-address-list></div>
             </div>
-            <div class="profile-tabs" role="tablist">
-                <button class="button is-active" type="button" data-profile-tab="available" aria-selected="true">Tin đang bán</button>
-                <button class="button button-outline" type="button" data-profile-tab="sold" aria-selected="false">Đã bán</button>
-                <button class="button button-outline" type="button" data-profile-tab="saved" aria-selected="false">Đã lưu</button>
+        </section>
+        <section class="profile-section">
+            <div class="section-heading profile-section__heading"><div><span class="eyebrow">An toàn</span><h2>Báo cáo của tôi</h2></div></div>
+            <div class="report-list profile-card" data-report-list><p class="caption">Đang tải...</p></div>
+        </section>
+        <section class="profile-section">
+            <div class="section-heading profile-section__heading">
+                <div><span class="eyebrow">Lối tắt</span><h2>Quản lý tài khoản</h2></div>
             </div>
-            <div class="book-grid profile-grid" data-profile-grid></div>
-            <div class="empty-state" data-profile-empty hidden><strong>Chưa có tin đăng</strong><a class="button button-primary" href="sell.html">Đăng bán giáo trình</a></div>
+            <div class="profile-shortcuts profile-card">
+                <a class="button button-outline" href="my-listings.html">Tin đăng của tôi</a>
+                <a class="button button-outline" href="messages.html">Tin nhắn</a>
+                <a class="button button-outline" href="favorites.html">Sách yêu thích</a>
+            </div>
         </section>
     </main>
     <footer class="site-footer" data-site-footer></footer>
@@ -88,26 +131,16 @@
     <script src="js/core/router.js"></script>
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js"></script>
-    <script src="js/components/books/book-card.js"></script>
     <script src="js/components/commerce/cards.js"></script>
-    <script src="js/components/messaging/cards.js"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
-    <script src="js/api/users-api.js"></script>
     <script src="js/api/books-api.js"></script>
-    <script src="js/api/favorites-api.js"></script>
-    <script src="js/api/reservations-api.js"></script>
-    <script src="js/api/orders-api.js"></script>
-    <script src="js/api/payments-api.js"></script>
-    <script src="js/api/shipping-api.js"></script>
-    <script src="js/api/returns-api.js"></script>
-    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/users-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
     <script src="js/api/reports-api.js"></script>
-    <script src="js/api/admin-api.js"></script>
     <script src="js/main.js"></script>
-    <script src="js/profile-account.js"></script>
-    <script src="js/profile.js"></script>
+    <script src="js/profile.js?v=profile-v2"></script>
+    <script src="js/profile-account.js?v=profile-v2"></script>
 </body>
 </html>

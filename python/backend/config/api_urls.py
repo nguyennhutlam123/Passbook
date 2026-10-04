@@ -50,7 +50,7 @@ from notifications.api_views import (
 )
 from reports.api_views import MyReportListView, ReportCreateView
 from reports.admin_api_views import AdminReportDetailView, AdminReportListView
-from reports.dashboard_api_views import AdminDashboardView
+from reports.dashboard_api_views import AdminDashboardSectionView, AdminDashboardView
 from books.api_views import (
     BookDetailView,
     BookImageDetailView,
@@ -93,11 +93,27 @@ from books.commerce_api_views import (
     ShipmentListCreateView,
     ShipmentTrackingCreateView,
 )
+from books.public_profile_api_views import PublicUserListingsView
+from books.admin_dashboard_views import (
+    AdminBorrowOrderDetailView,
+    AdminBorrowOrderListView,
+    AdminBankTransferReviewView,
+    AdminOrderDetailView,
+    AdminOrderListView,
+    AdminPaymentDetailView,
+    AdminPaymentListView,
+    AdminReservationDetailView,
+    AdminReservationListView,
+    AdminShipmentDetailView,
+    AdminShipmentListView,
+    AdminShipmentStatusView,
+)
 from books.sale_api_views import (
     SaleListingDetailView,
     SaleListingListCreateView,
 )
 from books.models import Category
+from books.category_taxonomy import category_order_expression
 from books.request_api_views import (
     BookIntentSummaryView,
     BookRequestDetailView,
@@ -261,8 +277,9 @@ class CatalogOptionsView(APIView):
             ),
             'categories': list(
                 Category.objects.filter(status='ACTIVE')
-                .order_by('name', 'id')
-                .values('id', 'name'),
+                .annotate(_category_order=category_order_expression())
+                .order_by('_category_order', 'name', 'id')
+                .values('id', 'name', 'slug'),
             ),
             'languages': list(
                 Language.objects.filter(status='ACTIVE')
@@ -326,6 +343,11 @@ urlpatterns = [
     path('auth/profile/', ProfileView.as_view(), name='profile'),
     path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('users/<int:user_id>/profile/', SellerProfileView.as_view(), name='seller-profile'),
+    path(
+        'users/<int:user_id>/listings/',
+        PublicUserListingsView.as_view(),
+        name='public-user-listings',
+    ),
     path('users/addresses/', UserAddressListCreateView.as_view(), name='address-list-create'),
     path('users/addresses/<int:address_id>/', UserAddressDetailView.as_view(), name='address-detail'),
     path('my-books/', MyBooksView.as_view(), name='my-books'),
@@ -340,6 +362,71 @@ urlpatterns = [
     path('reports/my/', MyReportListView.as_view(), name='my-report-list'),
     path('admin/reports/', AdminReportListView.as_view(), name='admin-report-list'),
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
+    path(
+        'admin/dashboard/reservations/',
+        AdminReservationListView.as_view(),
+        name='admin-dashboard-reservations',
+    ),
+    path(
+        'admin/dashboard/reservations/<int:reservation_id>/',
+        AdminReservationDetailView.as_view(),
+        name='admin-dashboard-reservation-detail',
+    ),
+    path(
+        'admin/dashboard/borrow-orders/',
+        AdminBorrowOrderListView.as_view(),
+        name='admin-dashboard-borrow-orders',
+    ),
+    path(
+        'admin/dashboard/borrow-orders/<int:borrow_order_id>/',
+        AdminBorrowOrderDetailView.as_view(),
+        name='admin-dashboard-borrow-detail',
+    ),
+    path(
+        'admin/dashboard/orders/',
+        AdminOrderListView.as_view(),
+        name='admin-dashboard-orders',
+    ),
+    path(
+        'admin/dashboard/orders/<int:order_id>/',
+        AdminOrderDetailView.as_view(),
+        name='admin-dashboard-order-detail',
+    ),
+    path(
+        'admin/dashboard/payments/',
+        AdminPaymentListView.as_view(),
+        name='admin-dashboard-payments',
+    ),
+    path(
+        'admin/dashboard/payments/<int:payment_id>/',
+        AdminPaymentDetailView.as_view(),
+        name='admin-dashboard-payment-detail',
+    ),
+    path(
+        'admin/dashboard/payments/<int:payment_id>/bank-transfer-review/',
+        AdminBankTransferReviewView.as_view(),
+        name='admin-dashboard-bank-transfer-review',
+    ),
+    path(
+        'admin/dashboard/shipping/shipments/',
+        AdminShipmentListView.as_view(),
+        name='admin-dashboard-shipping-shipments',
+    ),
+    path(
+        'admin/dashboard/shipping/shipments/<int:shipment_id>/',
+        AdminShipmentDetailView.as_view(),
+        name='admin-dashboard-shipment-detail',
+    ),
+    path(
+        'admin/dashboard/shipping/shipments/<int:shipment_id>/status/',
+        AdminShipmentStatusView.as_view(),
+        name='admin-dashboard-shipment-status',
+    ),
+    path(
+        'admin/dashboard/<str:section>/',
+        AdminDashboardSectionView.as_view(),
+        name='admin-dashboard-section',
+    ),
     path(
         'admin/reports/<int:report_id>/',
         AdminReportDetailView.as_view(),
@@ -415,13 +502,13 @@ urlpatterns = [
     path('orders/<int:order_id>/reviews/', ReviewCreateView.as_view(), name='order-reviews'),
     path('borrow-orders/', BorrowOrderListView.as_view(), name='borrow-order-list'),
     path(
-        'borrow-orders/<int:borrow_order_id>/<str:action>/',
-        BorrowOrderActionView.as_view(),
-        name='borrow-order-action',
-    ),
-    path(
         'borrow-orders/<int:borrow_order_id>/return-request/',
         BorrowOrderReturnRequestView.as_view(),
         name='borrow-order-return-request',
+    ),
+    path(
+        'borrow-orders/<int:borrow_order_id>/<str:action>/',
+        BorrowOrderActionView.as_view(),
+        name='borrow-order-action',
     ),
 ]

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.http import Http404
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -91,3 +91,49 @@ class NotificationAuthorizationTests(SimpleTestCase):
 
         self.assertEqual(list_response.status_code, 401)
         self.assertEqual(update_response.status_code, 401)
+
+
+class OrderNotificationTests(SimpleTestCase):
+    @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+    def test_order_notification_is_created_for_each_party_and_emails_after_commit(self):
+        from notifications.services import notify_order_parties
+
+        buyer = SimpleNamespace(id=1, email='buyer@example.test', full_name='Buyer')
+        seller = SimpleNamespace(id=2, email='seller@example.test', full_name='Seller')
+        order = SimpleNamespace(
+            id=22,
+            order_code='ORD-22',
+            status='CONFIRMED',
+            buyer=buyer,
+            seller=seller,
+        )
+        notifications = []
+        callbacks = []
+
+        with patch(
+            'notifications.services.Notification.objects.create',
+            side_effect=lambda **kwargs: notifications.append(kwargs),
+        ), patch(
+            'notifications.services.transaction.on_commit',
+            side_effect=lambda callback: callbacks.append(callback),
+        ), patch('notifications.services.send_mail', return_value=1) as send_mail:
+            notify_order_parties(
+                order,
+                title='Đặt hàng thành công',
+                content='Đơn hàng đã được tạo.',
+            )
+            self.assertEqual([item['user_id'] for item in notifications], [1, 2])
+            self.assertEqual([item['entity_id'] for item in notifications], [22, 22])
+            self.assertEqual(len(callbacks), 1)
+            callbacks[0]()
+            self.assertEqual(send_mail.call_count, 2)
+            self.assertEqual(send_mail.call_args_list[0].args[3], ['buyer@example.test'])
+            self.assertEqual(send_mail.call_args_list[1].args[3], ['seller@example.test'])
+
+    def test_status_notification_is_not_created_when_status_is_unchanged(self):
+        from notifications.services import notify_order_status_changed
+
+        order = SimpleNamespace(status='CONFIRMED')
+        with patch('notifications.services.Notification.objects.create') as create:
+            notify_order_status_changed(order, 'CONFIRMED')
+        create.assert_not_called()

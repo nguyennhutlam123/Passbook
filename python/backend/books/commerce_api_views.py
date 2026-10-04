@@ -10,12 +10,13 @@ from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from users.models import UserAddress
+from users.models import User, UserAddress
+from notifications.services import notify_order_parties
 from .models import (
     Book,
     BookImage,
@@ -49,6 +50,12 @@ from .services import (
     transition_fake_payment,
     transition_fake_refund,
     transition_reservation,
+)
+from .shipment_services import (
+    SHIPMENT_STATUSES,
+    is_return_shipment as shipment_is_return,
+    update_shipment_status,
+    validate_shipment_transition,
 )
 from .pagination import BookPagination
 
@@ -300,7 +307,11 @@ class CheckoutView(APIView):
             cart__status='ACTIVE',
         )
         line = self._checkout_line(item, request.user)
-        subtotal = line['amount']
+        try:
+            fee_rate = Decimal(getattr(settings, 'PASSBOOK_PLATFORM_FEE_RATE', '0.10'))
+        except (InvalidOperation, ValueError) as exc:
+            raise serializers.ValidationError('Cấu hình tỷ lệ phí không hợp lệ.') from exc
+        split = calculate_payment_split(line['amount'], fee_rate)
         return Response({
             'cart_item_id': item.id,
             'items': [{
@@ -310,9 +321,12 @@ class CheckoutView(APIView):
                 'subtotal': str(subtotal),
                 'currency': line['listing'].currency,
             }],
-            'subtotal': str(subtotal),
+            'subtotal': str(split['subtotal']),
             'shipping_total': '0',
-            'total_amount': str(subtotal),
+            'platform_fee_rate': str(split['platform_fee_rate']),
+            'platform_fee': str(split['platform_fee']),
+            'seller_earnings': str(split['seller_amount']),
+            'total_amount': str(split['amount']),
             'currency': line['listing'].currency,
         })
 
@@ -361,6 +375,11 @@ class CheckoutView(APIView):
         sale_groups = defaultdict(list)
         for item in items:
             if item.sale_listing_id:
+                pending_transfer = SaleOrderItem.objects.filter(
+                    sale_listing_id=OuterRef('pk'),
+                    order__status='PENDING_PAYMENT',
+                    order__payments__status='PROCESSING',
+                )
                 listing = SaleListing.objects.select_for_update().select_related(
                     'book', 'seller',
                 ).filter(
@@ -369,6 +388,10 @@ class CheckoutView(APIView):
                     pk=item.sale_listing_id,
                     status='ACTIVE',
                     book__status='AVAILABLE',
+                ).annotate(
+                    _pending_transfer=Exists(pending_transfer),
+                ).filter(
+                    _pending_transfer=False,
                 ).first()
                 if listing is None:
                     raise serializers.ValidationError('Sách này không còn khả dụng.')
@@ -386,36 +409,59 @@ class CheckoutView(APIView):
             (listing.price for group in sale_groups.values() for _, listing in group),
             Decimal('0'),
         )
-        if not fake_payments_enabled():
+        payment_method = data['payment_method']
+        try:
+            fee_rate = Decimal(getattr(settings, 'PASSBOOK_PLATFORM_FEE_RATE', '0.10'))
+        except (InvalidOperation, ValueError) as exc:
+            raise serializers.ValidationError('Cấu hình tỷ lệ phí không hợp lệ.') from exc
+        total_amount = sum(
+            (
+                calculate_payment_split(
+                    sum((listing.price for _, listing in group), Decimal('0')),
+                    fee_rate,
+                )['amount']
+                for group in sale_groups.values()
+            ),
+            Decimal('0'),
+        )
+        payment_state = {
+            'ONLINE': ('PAID', 'CONFIRMED', 'online'),
+            'FAKE': ('PAID', 'CONFIRMED', 'fake'),
+            'COD': ('PENDING', 'CONFIRMED', 'manual'),
+            'BANK_TRANSFER': ('PROCESSING', 'PENDING_PAYMENT', 'bank_transfer'),
+        }[payment_method]
+        payment_status, order_status, payment_provider_name = payment_state
+        if payment_method == 'FAKE' and not fake_payments_enabled():
             return Response(
                 {'detail': 'Thanh toán giả lập chỉ khả dụng trong local/test.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        payment_provider = get_payment_provider('fake')
-        if not isinstance(payment_provider, FakePaymentProvider):
-            raise PaymentProviderUnavailable('Fake payment provider không khả dụng.')
-        payment_status = {
-            'SUCCESS': 'PAID',
-            'FAILURE': 'FAILED',
-            'CANCEL': 'CANCELLED',
-        }[data['payment_outcome']]
-        payment_provider.transition('PENDING', payment_status)
-        if payment_status != 'PAID':
-            message = (
-                'Bạn đã hủy thanh toán; đơn hàng chưa được tạo và giỏ hàng vẫn được giữ.'
-                if payment_status == 'CANCELLED'
-                else 'Thanh toán thất bại; đơn hàng chưa được tạo và giỏ hàng vẫn được giữ.'
-            )
-            return Response(
-                {'detail': message, 'payment_status': payment_status},
-                status=status.HTTP_409_CONFLICT if payment_status == 'CANCELLED'
-                else status.HTTP_402_PAYMENT_REQUIRED,
-            )
+        payment_provider = None
+        if payment_method == 'FAKE':
+            payment_provider = get_payment_provider('fake')
+            if not isinstance(payment_provider, FakePaymentProvider):
+                raise PaymentProviderUnavailable('Fake payment provider không khả dụng.')
+            payment_status = {
+                'SUCCESS': 'PAID',
+                'FAILURE': 'FAILED',
+                'CANCEL': 'CANCELLED',
+            }[data['payment_outcome']]
+            payment_provider.transition('PENDING', payment_status)
+            if payment_status != 'PAID':
+                message = (
+                    'Bạn đã hủy thanh toán; đơn hàng chưa được tạo và giỏ hàng vẫn được giữ.'
+                    if payment_status == 'CANCELLED'
+                    else 'Thanh toán thất bại; đơn hàng chưa được tạo và giỏ hàng vẫn được giữ.'
+                )
+                return Response(
+                    {'detail': message, 'payment_status': payment_status},
+                    status=status.HTTP_409_CONFLICT if payment_status == 'CANCELLED'
+                    else status.HTTP_402_PAYMENT_REQUIRED,
+                )
+        elif payment_method == 'ONLINE':
+            payment_status = 'PAID'
+            payment_provider_name = 'online'
 
-        try:
-            fee_rate = Decimal(getattr(settings, 'PASSBOOK_PLATFORM_FEE_RATE', '0'))
-        except (InvalidOperation, ValueError) as exc:
-            raise serializers.ValidationError('Cấu hình tỷ lệ phí không hợp lệ.') from exc
         with transaction.atomic():
             created_orders = []
             checkout = CheckoutGroup.objects.create(
@@ -423,50 +469,70 @@ class CheckoutView(APIView):
                 idempotency_key=data['idempotency_key'],
                 cart=cart,
                 buyer=request.user,
-                status='COMPLETED',
+                status='PENDING_PAYMENT' if order_status == 'PENDING_PAYMENT' else 'COMPLETED',
                 currency='VND',
                 subtotal=subtotal,
                 shipping_total=Decimal('0'),
                 discount_total=Decimal('0'),
-                total_amount=subtotal,
+                total_amount=total_amount,
                 shipping_address_snapshot=shipping_snapshot,
                 pricing_snapshot={
                     'subtotal': str(subtotal),
                     'shipping_total': '0',
                     'discount_total': '0',
-                    'total_amount': str(subtotal),
+                    'platform_fee_rate': str(fee_rate),
+                    'platform_fee': str(sum(
+                        calculate_payment_split(
+                            sum((listing.price for _, listing in group), Decimal('0')),
+                            fee_rate,
+                        )['platform_fee']
+                        for group in sale_groups.values()
+                    )),
+                    'seller_earnings': str(sum(
+                        calculate_payment_split(
+                            sum((listing.price for _, listing in group), Decimal('0')),
+                            fee_rate,
+                        )['seller_amount']
+                        for group in sale_groups.values()
+                    )),
+                    'total_amount': str(total_amount),
                     'currency': 'VND',
                 },
                 created_at=now,
                 updated_at=now,
-                completed_at=now,
+                completed_at=now if order_status != 'PENDING_PAYMENT' else None,
             )
 
             for seller_id, listings in sale_groups.items():
                 group_total = sum((listing.price for _, listing in listings), Decimal('0'))
+                split = calculate_payment_split(group_total, fee_rate)
                 order = Order.objects.create(
                     order_code=f'ORD-{uuid4().hex[:24].upper()}',
                     checkout_group=checkout,
                     buyer=request.user,
                     seller_id=seller_id,
                     order_type='SALE',
-                    status='CONFIRMED',
+                    status=order_status,
                     currency='VND',
                     subtotal=group_total,
                     shipping_fee=Decimal('0'),
                     discount_amount=Decimal('0'),
-                    total_amount=group_total,
+                    total_amount=split['amount'],
                     shipping_address_snapshot=shipping_snapshot,
                     pricing_snapshot={
                         'subtotal': str(group_total),
+                        'platform_fee_rate': str(split['platform_fee_rate']),
+                        'platform_fee': str(split['platform_fee']),
+                        'seller_earnings': str(split['seller_amount']),
+                        'customer_total': str(split['amount']),
                         'shipping_fee': '0',
-                        'total_amount': str(group_total),
+                        'total_amount': str(split['amount']),
                         'currency': 'VND',
                     },
                     placed_at=now,
                     created_at=now,
                     updated_at=now,
-                    completed_at=now,
+                    completed_at=None,
                 )
                 created_orders.append((order, group_total))
                 for _, listing in listings:
@@ -483,28 +549,36 @@ class CheckoutView(APIView):
                         subtotal=listing.price,
                         created_at=now,
                     )
-                    listing.status = 'SOLD'
-                    listing.updated_at = now
-                    listing.save(update_fields=['status', 'updated_at'])
-                    listing.book.status = 'SOLD'
-                    listing.book.updated_at = now
-                    listing.book.save(update_fields=['status', 'updated_at'])
+                    if order_status == 'CONFIRMED':
+                        listing.status = 'SOLD'
+                        listing.updated_at = now
+                        listing.save(update_fields=['status', 'updated_at'])
+                        listing.book.status = 'SOLD'
+                        listing.book.updated_at = now
+                        listing.book.save(update_fields=['status', 'updated_at'])
 
             for order, amount in created_orders:
                 split = calculate_payment_split(amount, fee_rate)
                 payment_idempotency_key = hashlib.sha256(
                     f"{data['idempotency_key']}:{order.id}".encode(),
                 ).hexdigest()
-                provider_reference = payment_provider.create_payment_intent(
-                    payment_idempotency_key,
-                    split['amount'],
-                    order.currency,
+                provider_reference = (
+                    payment_provider.create_payment_intent(
+                        payment_idempotency_key,
+                        split['amount'],
+                        order.currency,
+                    )
+                    if payment_provider else (
+                        f'ONLINE-{uuid4().hex[:20].upper()}'
+                        if payment_method == 'ONLINE'
+                        else f'PB-{payment_method}-{uuid4().hex[:20].upper()}'
+                    )
                 )
                 Payment.objects.create(
                     checkout_group=checkout,
                     order=order,
                     payer=request.user,
-                    provider='fake',
+                    provider=payment_provider_name,
                     payment_method=data['payment_method'],
                     provider_transaction_code=provider_reference,
                     payment_purpose='CHECKOUT',
@@ -513,11 +587,25 @@ class CheckoutView(APIView):
                     platform_fee=split['platform_fee'],
                     seller_amount=split['seller_amount'],
                     currency=order.currency,
-                    status='PAID',
+                    status=payment_status,
                     idempotency_key=payment_idempotency_key,
-                    paid_at=now,
+                    paid_at=now if payment_status == 'PAID' else None,
                     created_at=now,
                     updated_at=now,
+                )
+                notify_order_parties(
+                    order,
+                    title=f'Đặt hàng thành công · {order.order_code}',
+                    content=(
+                        'Đơn hàng đã được tạo và thanh toán thành công.'
+                        if payment_status == 'PAID'
+                        else (
+                            'Đơn hàng COD đã được tạo; tiền sẽ thu khi giao hàng. '
+                            'Xác nhận thu tiền COD chưa được hỗ trợ.'
+                            if payment_method == 'COD'
+                            else 'Đơn hàng đang chờ Admin xác minh chuyển khoản.'
+                        )
+                    ),
                 )
 
             CartItem.objects.filter(
@@ -577,7 +665,10 @@ class CheckoutInputSerializer(serializers.Serializer):
         choices=('SUCCESS', 'FAILURE', 'CANCEL'),
         default='SUCCESS',
     )
-    payment_method = serializers.ChoiceField(choices=('TEST',), default='TEST')
+    payment_method = serializers.ChoiceField(
+        choices=('ONLINE', 'FAKE', 'COD', 'BANK_TRANSFER'),
+        default='ONLINE',
+    )
 
 
 class CheckoutAddressInputSerializer(serializers.Serializer):
@@ -620,6 +711,8 @@ class LendListingListCreateView(APIView):
             'book__book_edition__book_work__category',
             'book__book_edition__language',
             'lender__university',
+            'lender__faculty',
+            'lender__major',
         )
         subject_links = BookWorkSubject.objects.filter(
             is_primary=True,
@@ -648,6 +741,12 @@ class LendListingListCreateView(APIView):
                     'notes',
                 ),
                 to_attr='listing_terms',
+            ),
+            'book__book_edition__identifiers',
+            Prefetch(
+                'reviews',
+                queryset=Review.objects.select_related('reviewer').order_by('-created_at', '-id'),
+                to_attr='listing_reviews',
             ),
         )
         active_intents = BookRequest.objects.filter(
@@ -745,6 +844,13 @@ class LendListingListCreateView(APIView):
         if category_id is not None:
             queryset = queryset.filter(
                 book__book_edition__book_work__category_id=category_id,
+                book__book_edition__book_work__category__status='ACTIVE',
+            )
+        category_slug = (params.get('category_slug') or '').strip()
+        if category_slug:
+            queryset = queryset.filter(
+                book__book_edition__book_work__category__slug=category_slug,
+                book__book_edition__book_work__category__status='ACTIVE',
             )
         publication_year = _query_integer(params, 'publication_year')
         if publication_year is not None:
@@ -914,6 +1020,8 @@ class LendListingDetailView(APIView):
                 'book__book_edition__book_work__category',
                 'book__book_edition__language',
                 'lender__university',
+                'lender__faculty',
+                'lender__major',
             ).prefetch_related(
                 Prefetch(
                     'book__images',
@@ -941,6 +1049,12 @@ class LendListingDetailView(APIView):
                     ),
                     to_attr='listing_terms',
                 ),
+                'book__book_edition__identifiers',
+                Prefetch(
+                    'reviews',
+                    queryset=Review.objects.select_related('reviewer').order_by('-created_at', '-id'),
+                    to_attr='listing_reviews',
+                ),
             ),
             pk=listing_id,
         )
@@ -966,6 +1080,44 @@ def lend_listing_payload(listing):
         book.condition_label,
     )
     terms = getattr(listing, 'listing_terms', None)
+    identifiers = edition.identifiers.all()
+    isbn = next(
+        (
+            identifier.identifier_value
+            for identifier in identifiers
+            if 'ISBN' in identifier.identifier_type.upper()
+        ),
+        None,
+    )
+    reviews = getattr(listing, 'listing_reviews', None)
+    if reviews is None:
+        reviews = listing.reviews.select_related('reviewer').order_by('-created_at', '-id')
+    seller = {
+        'id': listing.lender_id,
+        'name': listing.lender.full_name,
+        'university': (
+            {'id': listing.lender.university_id, 'name': listing.lender.university.name}
+            if listing.lender.university_id else None
+        ),
+        'faculty': (
+            {'id': listing.lender.faculty_id, 'name': listing.lender.faculty.name}
+            if listing.lender.faculty_id else None
+        ),
+        'major': (
+            {'id': listing.lender.major_id, 'name': listing.lender.major.name}
+            if listing.lender.major_id else None
+        ),
+    }
+    serialized_reviews = [
+        {
+            'id': review.id,
+            'rating': review.rating,
+            'comment': review.comment,
+            'created_at': review.created_at,
+            'reviewer': {'id': review.reviewer_id, 'name': review.reviewer.full_name},
+        }
+        for review in reviews
+    ]
     return {
         'id': listing.id,
         'book_id': listing.book_id,
@@ -1012,27 +1164,25 @@ def lend_listing_payload(listing):
             {'id': subject.id, 'name': subject.name, 'code': subject.code}
             if subject else None
         ),
+        'isbn': isbn,
+        'author': work.author_name,
+        'publisher': edition.publisher_name,
+        'language': (
+            {'id': language.id, 'name': language.name, 'code': language.code}
+            if language else None
+        ),
+        'reviews': serialized_reviews,
         'category': (
             {'id': work.category_id, 'name': work.category.name}
             if work.category_id else None
         ),
-        'seller': {
-            'id': listing.lender_id,
-            'name': listing.lender.full_name,
-            'university': (
-                {
-                    'id': listing.lender.university_id,
-                    'name': listing.lender.university.name,
-                }
-                if listing.lender.university_id else None
-            ),
-        },
+        'seller': seller,
         'book': {
             'id': book.id,
             'title': listing.title,
             'description': listing.description,
             'price': str(listing.rental_fee),
-            'status': 'available',
+            'status': borrow_availability_status(listing, book),
             'condition_status': book.condition_status,
             'condition_label': condition_label,
             'condition_description': book.condition_description,
@@ -1041,6 +1191,7 @@ def lend_listing_payload(listing):
             'publication_year': edition.publication_year,
             'author': work.author_name,
             'publisher': edition.publisher_name,
+            'isbn': isbn,
             'book_work_id': work.id,
             'buying_intent_count': getattr(listing, 'buying_intent_count', 0),
             'selling_intent_count': getattr(listing, 'selling_intent_count', 0),
@@ -1056,17 +1207,8 @@ def lend_listing_payload(listing):
                 {'id': work.category_id, 'name': work.category.name}
                 if work.category_id else None
             ),
-            'seller': {
-                'id': listing.lender_id,
-                'name': listing.lender.full_name,
-                'university': (
-                    {
-                        'id': listing.lender.university_id,
-                        'name': listing.lender.university.name,
-                    }
-                    if listing.lender.university_id else None
-                ),
-            },
+            'seller': seller,
+            'reviews': serialized_reviews,
             'images': [
                 {
                     'id': image.id,
@@ -1080,6 +1222,48 @@ def lend_listing_payload(listing):
     }
 
 
+def borrow_availability_status(listing, book):
+    if listing.status == 'ON_LOAN' or book.status == 'ON_LOAN':
+        return 'on_loan'
+    if listing.status == 'RESERVED' or book.status == 'RESERVED':
+        return 'reserved'
+    return {
+        'ACTIVE': 'available',
+        'CLOSED': 'hidden',
+        'EXPIRED': 'hidden',
+    }.get(listing.status, book.status.lower())
+
+
+def reservation_lend_listing_payload(listing):
+    if listing is None:
+        return None
+    terms = getattr(listing, 'listing_terms', None)
+    return {
+        'id': listing.id,
+        'title': listing.title,
+        'description': listing.description,
+        'rental_fee': str(listing.rental_fee),
+        'deposit_amount': (
+            str(listing.deposit_amount)
+            if listing.deposit_amount is not None else None
+        ),
+        'borrow_terms': (
+            {
+                'max_days': terms.max_days,
+                'late_fee_per_day': (
+                    str(terms.late_fee_per_day)
+                    if terms.late_fee_per_day is not None else None
+                ),
+                'deposit_required': terms.deposit_required,
+                'shipping_paid_by': terms.shipping_paid_by,
+                'return_method': terms.return_method,
+                'notes': terms.notes,
+            }
+            if terms is not None else None
+        ),
+    }
+
+
 class BookReservationListCreateView(APIView):
     def get_permissions(self):
         return [IsAuthenticated()]
@@ -1087,7 +1271,41 @@ class BookReservationListCreateView(APIView):
     def get(self, request, book_id=None):
         queryset = BookReservation.objects.filter(
             Q(requester=request.user) | Q(owner=request.user),
-        ).select_related('book').annotate(
+        ).select_related(
+            'book__book_edition__book_work',
+            'book__book_edition__book_work__category',
+            'requester',
+            'owner__university',
+            'owner__faculty',
+            'owner__major',
+        ).prefetch_related(
+            Prefetch(
+                'book__images',
+                queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                to_attr='primary_images',
+            ),
+            Prefetch(
+                'book__book_edition__book_work__subject_links',
+                queryset=BookWorkSubject.objects.filter(is_primary=True).select_related('subject'),
+                to_attr='primary_subject_links',
+            ),
+            Prefetch(
+                'book__lend_listings',
+                queryset=LendListing.objects.filter(
+                    status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+                ).select_related('lender').prefetch_related(
+                    Prefetch(
+                        'borrow_terms',
+                        queryset=BorrowTerms.objects.only(
+                            'id', 'lend_listing_id', 'max_days', 'late_fee_per_day',
+                            'deposit_required', 'shipping_paid_by', 'return_method', 'notes',
+                        ),
+                        to_attr='listing_terms',
+                    ),
+                ).order_by('-created_at', '-id'),
+                to_attr='reservation_lend_listings',
+            ),
+        ).annotate(
             _is_borrow=Exists(
                 LendListing.objects.filter(
                     book_id=OuterRef('book_id'),
@@ -1129,7 +1347,12 @@ class BookReservationListCreateView(APIView):
                         status='RESERVED',
                     ).update(status='ACTIVE', updated_at=now)
                     if lend_listing is not None and lend_listing.status == 'RESERVED':
-                        lend_listing.status = 'ACTIVE'
+                        lend_listing.status = (
+                            'EXPIRED'
+                            if lend_listing.expires_at is not None
+                            and lend_listing.expires_at <= now
+                            else 'ACTIVE'
+                        )
                         lend_listing.updated_at = now
                         lend_listing.save(update_fields=['status', 'updated_at'])
                     if book.status == 'RESERVED':
@@ -1138,20 +1361,49 @@ class BookReservationListCreateView(APIView):
                         book.save(update_fields=['status', 'updated_at'])
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        return paginator.get_paginated_response([
-            {
+        payload = []
+        for item in page:
+            work = item.book.book_edition.book_work
+            listings = item.book.reservation_lend_listings
+            listing = listings[0] if listings else None
+            subject_links = getattr(work, 'primary_subject_links', ())
+            primary_images = getattr(item.book, 'primary_images', ())
+            payload.append({
                 'id': item.id,
                 'book_id': item.book_id,
                 'requester_id': item.requester_id,
                 'owner_id': item.owner_id,
                 'listing_type': 'BORROW' if item._is_borrow else 'BUY',
+                'book': {
+                    'id': item.book_id,
+                    'title': listing.title if listing else work.title,
+                    'description': listing.description if listing else work.description,
+                    'condition_status': item.book.condition_status,
+                    'subject': (
+                        {'name': subject_links[0].subject.name, 'code': subject_links[0].subject.code}
+                        if subject_links
+                        else None
+                    ),
+                    'category': work.category.name if work.category_id else None,
+                    'edition': item.book.book_edition.edition_name,
+                    'publication_year': item.book.book_edition.publication_year,
+                    'primary_image': primary_images[0].image_url if primary_images else None,
+                },
+                'lender': {
+                    'id': item.owner_id,
+                    'name': item.owner.full_name,
+                    'university': item.owner.university.name if item.owner.university_id else None,
+                    'faculty': item.owner.faculty.name if item.owner.faculty_id else None,
+                    'major': item.owner.major.name if item.owner.major_id else None,
+                },
+                'requester': {'id': item.requester_id, 'name': item.requester.full_name},
+                'listing': reservation_lend_listing_payload(listing),
                 'status': item.status,
                 'created_at': item.created_at,
                 'expires_at': item.expires_at,
                 'updated_at': item.updated_at,
-            }
-            for item in page
-        ])
+            })
+        return paginator.get_paginated_response(payload)
 
     @transaction.atomic
     def post(self, request, book_id):
@@ -1253,38 +1505,102 @@ def reservation_payload(reservation):
 
 
 class BorrowReturnInputSerializer(serializers.Serializer):
-    return_method = serializers.CharField(max_length=30, required=False, allow_blank=True)
-    return_tracking_code = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    return_method = serializers.ChoiceField(
+        choices=(('DELIVERY', 'Giao hàng'),),
+        required=True,
+    )
+    carrier = serializers.CharField(max_length=100, allow_blank=False, trim_whitespace=True)
+    return_tracking_code = serializers.CharField(
+        max_length=100,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
     return_notes = serializers.CharField(required=False, allow_blank=True)
 
 
 class BorrowOrderReturnRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, borrow_order_id):
-        borrow = get_object_or_404(BorrowOrder, pk=borrow_order_id)
+        borrow = get_object_or_404(
+            BorrowOrder.objects.select_for_update().select_related(
+                'order',
+                'lend_listing',
+                'lend_listing__book',
+            ),
+            pk=borrow_order_id,
+        )
+        if request.user.id != borrow.borrower_id:
+            raise PermissionDenied('Chỉ người mượn mới có thể tạo yêu cầu trả sách.')
         serializer = BorrowReturnInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        borrow = transition_borrow_order(
-            borrow.id,
-            request.user,
-            'request_return',
-        )
+        if borrow.status not in ('ACTIVE', 'OVERDUE'):
+            raise serializers.ValidationError(
+                'Chỉ sách đang được mượn mới có thể yêu cầu trả.',
+            )
         fields = serializer.validated_data
-        for name in ('return_method', 'return_tracking_code', 'return_notes'):
-            if name in fields:
-                setattr(borrow, name, fields[name])
+        if borrow.return_status in ('REQUESTED', 'SHIPPING', 'DELIVERED'):
+            raise serializers.ValidationError('Đã có một yêu cầu trả sách đang hoạt động.')
+        if Shipment.objects.filter(
+            order=borrow.order,
+            tracking_code=fields['return_tracking_code'],
+        ).exists():
+            raise serializers.ValidationError(
+                {'return_tracking_code': 'Mã vận đơn này đã được dùng cho giao dịch mượn.'},
+            )
+        now = timezone.now()
+        shipment = Shipment.objects.create(
+            order=borrow.order,
+            carrier=fields['carrier'],
+            tracking_code=fields['return_tracking_code'],
+            shipping_fee=Decimal('0'),
+            status='PENDING',
+            currency='VND',
+            created_at=now,
+            updated_at=now,
+        )
+        ShipmentTracking.objects.create(
+            shipment=shipment,
+            status='PENDING',
+            source='SYSTEM',
+            changed_by_id=request.user.id,
+            description='Yêu cầu trả sách · chiều vận chuyển: BORROWER → OWNER.',
+            occurred_at=now,
+            created_at=now,
+        )
+        borrow.status = 'RETURN_REQUESTED'
+        borrow.return_status = 'SHIPPING'
+        borrow.return_method = fields['return_method']
+        borrow.return_tracking_code = fields['return_tracking_code']
+        borrow.return_requested_by = request.user
+        borrow.return_requested_at = now
+        borrow.return_notes = fields.get('return_notes')
+        borrow.updated_at = now
         borrow.save(update_fields=[
-            name for name in ('return_method', 'return_tracking_code', 'return_notes')
-            if name in fields
-        ] or ['updated_at'])
+            'status',
+            'return_status',
+            'return_method',
+            'return_tracking_code',
+            'return_requested_by',
+            'return_requested_at',
+            'return_notes',
+            'updated_at',
+        ])
         return Response({
             'id': borrow.id,
             'status': borrow.status,
             'return_status': borrow.return_status,
             'return_method': borrow.return_method,
             'return_tracking_code': borrow.return_tracking_code,
-        })
+            'shipment': {
+                'id': shipment.id,
+                'direction': 'BORROWER_TO_OWNER',
+                'status': shipment.status,
+                'carrier': shipment.carrier,
+                'tracking_code': shipment.tracking_code,
+            },
+        }, status=status.HTTP_201_CREATED)
 
 
 class ReviewCreateView(APIView):
@@ -1328,6 +1644,7 @@ class ReviewCreateView(APIView):
             'rating': review.rating,
             'comment': review.comment,
             'created_at': review.created_at,
+            'reviewer': {'id': review.reviewer_id, 'name': review.reviewer.full_name},
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -1570,15 +1887,56 @@ def checkout_payload(checkout):
                 'order_code': order.order_code,
                 'order_type': order.order_type,
                 'status': order.status,
+                'subtotal': str(order.subtotal),
+                'shipping_fee': str(order.shipping_fee),
                 'total_amount': str(order.total_amount),
+                'platform_fee_rate': (order.pricing_snapshot or {}).get('platform_fee_rate'),
+                'platform_fee': (order.pricing_snapshot or {}).get('platform_fee'),
+                'seller_earnings': (order.pricing_snapshot or {}).get('seller_earnings'),
                 'payment_status': next(
                     (payment.status for payment in order.payments.all()),
+                    None,
+                ),
+                'payment_method': next(
+                    (payment.payment_method for payment in order.payments.all()),
+                    None,
+                ),
+                'payment_reference': next(
+                    (payment.provider_transaction_code for payment in order.payments.all()),
                     None,
                 ),
             }
             for order in orders
         ],
     }
+
+
+def order_item_summaries(order):
+    if order.order_type == 'BORROW':
+        borrow = getattr(order, 'borrow_order', None)
+        if borrow is None:
+            return []
+        book = borrow.lend_listing.book
+        images = getattr(book, 'primary_images', ())
+        return [{
+            'title': borrow.lend_listing.title,
+            'unit_price': str(borrow.rental_fee),
+            'image_url': images[0].image_url if images else None,
+            'book_id': book.id,
+        }]
+    return [
+        {
+            'title': item.title_snapshot,
+            'unit_price': str(item.unit_price),
+            'image_url': (
+                item.book.primary_images[0].image_url
+                if getattr(item.book, 'primary_images', ())
+                else None
+            ),
+            'book_id': item.book_id,
+        }
+        for item in order.sale_items.all()
+    ]
 
 
 class OrderListView(APIView):
@@ -1588,8 +1946,34 @@ class OrderListView(APIView):
         queryset = Order.objects.filter(
             Q(buyer=request.user) | Q(seller=request.user),
         ).prefetch_related(
-            'sale_items',
+            Prefetch(
+                'sale_items',
+                queryset=SaleOrderItem.objects.select_related('book').prefetch_related(
+                    Prefetch(
+                        'book__images',
+                        queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                        to_attr='primary_images',
+                    ),
+                ),
+            ),
             Prefetch('payments', queryset=Payment.objects.order_by('-created_at', '-id')),
+            Prefetch(
+                'shipments',
+                queryset=Shipment.objects.order_by('-created_at', '-id'),
+                to_attr='latest_shipments',
+            ),
+            Prefetch(
+                'borrow_order',
+                queryset=BorrowOrder.objects.select_related(
+                    'lend_listing', 'lend_listing__book', 'lender', 'borrower',
+                ).prefetch_related(
+                    Prefetch(
+                        'lend_listing__book__images',
+                        queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                        to_attr='primary_images',
+                    ),
+                ),
+            ),
         ).order_by('-created_at', '-id')
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
@@ -1599,12 +1983,32 @@ class OrderListView(APIView):
                 'order_code': order.order_code,
                 'order_type': order.order_type,
                 'status': order.status,
+                'subtotal': str(order.subtotal),
+                'shipping_fee': str(order.shipping_fee),
                 'total_amount': str(order.total_amount),
                 'currency': order.currency,
                 'created_at': order.created_at,
-                'item_titles': [item.title_snapshot for item in order.sale_items.all()],
+                'items': order_item_summaries(order),
+                'item_titles': [item['title'] for item in order_item_summaries(order)],
+                'shipment_status': (
+                    order.latest_shipments[0].status
+                    if order.latest_shipments else None
+                ),
+                'shipment_tracking_code': (
+                    order.latest_shipments[0].tracking_code
+                    if order.latest_shipments else None
+                ),
+                'borrow_status': (
+                    order.borrow_order.status
+                    if order.order_type == 'BORROW' and hasattr(order, 'borrow_order')
+                    else None
+                ),
                 'payment_status': next(
                     (payment.status for payment in order.payments.all()),
+                    None,
+                ),
+                'payment_method': next(
+                    (payment.payment_method for payment in order.payments.all()),
                     None,
                 ),
                 'recipient_name': order.shipping_address_snapshot.get('recipient_name'),
@@ -1618,42 +2022,111 @@ class OrderDetailView(APIView):
 
     def get(self, request, order_id):
         order = get_object_or_404(
-            Order.objects.prefetch_related(
-                'sale_items',
+            Order.objects.select_related(
+                'borrow_order__lend_listing__book',
+                'borrow_order__lender',
+                'borrow_order__borrower',
+            ).prefetch_related(
+                Prefetch(
+                    'sale_items',
+                    queryset=SaleOrderItem.objects.select_related('book', 'sale_listing').prefetch_related(
+                        Prefetch(
+                            'book__images',
+                            queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                            to_attr='primary_images',
+                        ),
+                    ),
+                ),
                 'payments',
                 'shipments__tracking_events',
+                Prefetch(
+                    'reviews',
+                    queryset=Review.objects.select_related('reviewer').order_by('-created_at', '-id'),
+                    to_attr='order_reviews',
+                ),
+                Prefetch(
+                    'borrow_order__lend_listing__book__images',
+                    queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                    to_attr='primary_images',
+                ),
             ),
             pk=order_id,
         )
-        if request.user.id not in (order.buyer_id, order.seller_id):
+        borrow = getattr(order, 'borrow_order', None)
+        order_participants = {order.buyer_id, order.seller_id}
+        if borrow is not None:
+            order_participants.update((borrow.borrower_id, borrow.lender_id))
+        if request.user.id not in order_participants:
             raise PermissionDenied('Bạn không có quyền xem đơn hàng này.')
+        items = [
+            {
+                'id': item.id,
+                'title': item.title_snapshot,
+                'condition': item.condition_snapshot,
+                'unit_price': str(item.unit_price),
+                'image_url': (
+                    item.book.primary_images[0].image_url
+                    if getattr(item.book, 'primary_images', ())
+                    else None
+                ),
+                'book_id': item.book_id,
+            }
+            for item in order.sale_items.all()
+        ]
+        if borrow is not None:
+            images = getattr(borrow.lend_listing.book, 'primary_images', ())
+            items.append({
+                'id': borrow.id,
+                'title': borrow.lend_listing.title,
+                'condition': borrow.lend_listing.book.condition_status,
+                'unit_price': str(borrow.rental_fee),
+                'image_url': images[0].image_url if images else None,
+                'book_id': borrow.lend_listing.book_id,
+            })
         data = {
             'id': order.id,
             'order_code': order.order_code,
             'order_type': order.order_type,
             'status': order.status,
+            'subtotal': str(order.subtotal),
+            'shipping_fee': str(order.shipping_fee),
             'total_amount': str(order.total_amount),
+            'platform_fee_rate': (order.pricing_snapshot or {}).get('platform_fee_rate'),
+            'platform_fee': (order.pricing_snapshot or {}).get('platform_fee'),
+            'seller_earnings': (order.pricing_snapshot or {}).get('seller_earnings'),
             'currency': order.currency,
             'created_at': order.created_at,
             'shipping_address': order.shipping_address_snapshot,
-            'items': [
-                {
-                    'id': item.id,
-                    'title': item.title_snapshot,
-                    'condition': item.condition_snapshot,
-                    'unit_price': str(item.unit_price),
-                }
-                for item in order.sale_items.all()
-            ],
+            'items': items,
             'payments': [
-                {'id': payment.id, 'status': payment.status, 'amount': str(payment.amount)}
+                {
+                    'id': payment.id,
+                    'payment_method': payment.payment_method,
+                    'provider': payment.provider,
+                    'reference': payment.provider_transaction_code,
+                    'status': payment.status,
+                    'amount': str(payment.amount),
+                    'platform_fee': str(payment.platform_fee),
+                    'seller_amount': str(payment.seller_amount),
+                    'paid_at': payment.paid_at,
+                }
                 for payment in order.payments.all()
             ],
             'shipments': [
                 {
                     'id': shipment.id,
+                    'direction': (
+                        'BORROWER_TO_OWNER'
+                        if borrow is not None
+                        and borrow.return_tracking_code
+                        and shipment.tracking_code == borrow.return_tracking_code
+                        else 'OWNER_TO_BORROWER'
+                        if borrow is not None
+                        else 'SELLER_TO_BUYER'
+                    ),
                     'status': shipment.status,
                     'tracking_code': shipment.tracking_code,
+                        'carrier': shipment.carrier,
                     'tracking': [
                         {
                             'status': event.status,
@@ -1666,16 +2139,46 @@ class OrderDetailView(APIView):
                 }
                 for shipment in order.shipments.all()
             ],
+            'reviews': [
+                {
+                    'id': review.id,
+                    'rating': review.rating,
+                    'comment': review.comment,
+                    'created_at': review.created_at,
+                    'reviewer': {
+                        'id': review.reviewer_id,
+                        'name': review.reviewer.full_name,
+                    },
+                }
+                for review in order.order_reviews
+            ],
         }
         if order.order_type == 'BORROW':
-            borrow = getattr(order, 'borrow_order', None)
+            lend_listing = borrow.lend_listing if borrow else None
+            borrowed_book = lend_listing.book if lend_listing else None
+            primary_images = getattr(borrowed_book, 'primary_images', ()) if borrowed_book else ()
             data['borrow'] = {
                 'id': borrow.id,
                 'status': borrow.status,
+                'lend_listing_id': borrow.lend_listing_id,
+                'listing_title': lend_listing.title if lend_listing else None,
+                'listing_description': lend_listing.description if lend_listing else None,
+                'lender': {'id': borrow.lender_id, 'name': borrow.lender.full_name},
+                'borrower': {'id': borrow.borrower_id, 'name': borrow.borrower.full_name},
+                'rental_fee': str(borrow.rental_fee),
+                'deposit_amount': str(borrow.deposit_amount),
+                'borrow_terms': borrow.borrow_terms_snapshot,
                 'expected_start_at': borrow.expected_start_at,
                 'expected_return_at': borrow.expected_return_at,
                 'actual_start_at': borrow.actual_start_at,
                 'actual_return_at': borrow.actual_return_at,
+                'return_status': borrow.return_status,
+                'return_method': borrow.return_method,
+                'return_tracking_code': borrow.return_tracking_code,
+                'return_requested_at': borrow.return_requested_at,
+                'return_approved_at': borrow.return_approved_at,
+                'return_notes': borrow.return_notes,
+                'image_url': primary_images[0].image_url if primary_images else None,
             }
         return Response(data)
 
@@ -1731,31 +2234,103 @@ class BorrowOrderListView(APIView):
     def get(self, request):
         queryset = BorrowOrder.objects.filter(
             Q(borrower=request.user) | Q(lender=request.user),
+        ).select_related(
+            'order',
+            'lend_listing',
+            'lend_listing__book',
+            'lender',
+            'borrower',
+        ).prefetch_related(
+            Prefetch(
+                'lend_listing__book__images',
+                queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                to_attr='primary_images',
+            ),
+            Prefetch(
+                'order__shipments',
+                queryset=Shipment.objects.prefetch_related(
+                    'tracking_events',
+                ).order_by('id'),
+                to_attr='borrow_shipments',
+            ),
         ).order_by('-created_at', '-id')
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         return paginator.get_paginated_response([
-            {
-                'id': borrow.id,
-                'order_id': borrow.order_id,
-                'lend_listing_id': borrow.lend_listing_id,
-                'lender_id': borrow.lender_id,
-                'borrower_id': borrow.borrower_id,
-                'status': borrow.status,
-                'expected_start_at': borrow.expected_start_at,
-                'expected_return_at': borrow.expected_return_at,
-                'actual_start_at': borrow.actual_start_at,
-                'actual_return_at': borrow.actual_return_at,
-            }
+            self._borrow_payload(borrow)
             for borrow in page
         ])
+
+    @staticmethod
+    def _borrow_payload(borrow):
+        return_shipment = next(
+            (
+                shipment
+                for shipment in getattr(borrow.order, 'borrow_shipments', ())
+                if (
+                    borrow.return_tracking_code
+                    and shipment.tracking_code == borrow.return_tracking_code
+                )
+            ),
+            None,
+        )
+        return {
+            'id': borrow.id,
+            'order_id': borrow.order_id,
+            'lend_listing_id': borrow.lend_listing_id,
+            'lender_id': borrow.lender_id,
+            'borrower_id': borrow.borrower_id,
+            'status': borrow.status,
+            'order_code': borrow.order.order_code,
+            'order_status': borrow.order.status,
+            'title': borrow.lend_listing.title,
+            'description': borrow.lend_listing.description,
+            'image_url': (
+                borrow.lend_listing.book.primary_images[0].image_url
+                if borrow.lend_listing.book.primary_images else None
+            ),
+            'rental_fee': str(borrow.rental_fee),
+            'deposit_amount': str(borrow.deposit_amount),
+            'borrow_terms': borrow.borrow_terms_snapshot,
+            'lender_name': borrow.lender.full_name,
+            'borrower_name': borrow.borrower.full_name,
+            'created_at': borrow.created_at,
+            'expected_start_at': borrow.expected_start_at,
+            'expected_return_at': borrow.expected_return_at,
+            'actual_start_at': borrow.actual_start_at,
+            'actual_return_at': borrow.actual_return_at,
+            'return_status': borrow.return_status,
+            'return_method': borrow.return_method,
+            'return_tracking_code': borrow.return_tracking_code,
+            'return_requested_at': borrow.return_requested_at,
+            'return_approved_at': borrow.return_approved_at,
+            'return_notes': borrow.return_notes,
+            'return_shipment': (
+                {
+                    'id': return_shipment.id,
+                    'direction': 'BORROWER_TO_OWNER',
+                    'status': return_shipment.status,
+                    'carrier': return_shipment.carrier,
+                    'tracking_code': return_shipment.tracking_code,
+                    'tracking': [
+                        {
+                            'status': entry.status,
+                            'location': entry.location,
+                            'description': entry.description,
+                            'occurred_at': entry.occurred_at,
+                        }
+                        for entry in return_shipment.tracking_events.all()
+                    ],
+                }
+                if return_shipment else None
+            ),
+        }
 
 
 class BorrowOrderActionView(APIView):
     permission_classes = [IsAuthenticated]
     ACTIONS = {
-        'confirm', 'reject', 'ready', 'start', 'request-return', 'return',
-        'complete', 'cancel',
+        'confirm', 'reject', 'ready', 'start', 'complete', 'cancel',
     }
 
     def post(self, request, borrow_order_id, action):
@@ -1770,6 +2345,7 @@ class BorrowOrderActionView(APIView):
         return Response({
             'id': borrow.id,
             'status': borrow.status,
+            'return_status': borrow.return_status,
             'expected_start_at': borrow.expected_start_at,
             'expected_return_at': borrow.expected_return_at,
             'actual_start_at': borrow.actual_start_at,
@@ -1788,12 +2364,17 @@ class PaymentListCreateView(APIView):
             {
                 'id': payment.id,
                 'order_id': payment.order_id,
+                'payment_method': payment.payment_method,
+                'provider': payment.provider,
+                'reference': payment.provider_transaction_code,
                 'amount': str(payment.amount),
                 'platform_fee_rate': str(payment.platform_fee_rate),
                 'platform_fee': str(payment.platform_fee),
                 'seller_amount': str(payment.seller_amount),
                 'status': payment.status,
                 'paid_at': payment.paid_at,
+                'created_at': payment.created_at,
+                'updated_at': payment.updated_at,
             }
             for payment in order.payments.order_by('-created_at', '-id')
         ])
@@ -1813,11 +2394,34 @@ class PaymentListCreateView(APIView):
             fee_rate = Decimal(getattr(settings, 'PASSBOOK_PLATFORM_FEE_RATE', '0'))
         except (InvalidOperation, ValueError) as exc:
             raise serializers.ValidationError('Cấu hình tỷ lệ phí không hợp lệ.') from exc
+        if order.status != 'PENDING_PAYMENT':
+            raise serializers.ValidationError('Order không còn chờ thanh toán.')
         try:
             provider = get_payment_provider(data['provider'])
         except PaymentProviderUnavailable as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        split = calculate_payment_split(order.total_amount, fee_rate)
+        if order.order_type == 'SALE':
+            split = calculate_payment_split(order.subtotal, fee_rate)
+            if split['amount'] != order.total_amount:
+                order.total_amount = split['amount']
+                order.pricing_snapshot = {
+                    **(order.pricing_snapshot or {}),
+                    'subtotal': str(split['subtotal']),
+                    'platform_fee_rate': str(split['platform_fee_rate']),
+                    'platform_fee': str(split['platform_fee']),
+                    'seller_earnings': str(split['seller_amount']),
+                    'customer_total': str(split['amount']),
+                    'total_amount': str(split['amount']),
+                }
+                order.updated_at = timezone.now()
+                order.save(update_fields=['total_amount', 'pricing_snapshot', 'updated_at'])
+        else:
+            split = {
+                'amount': order.total_amount,
+                'platform_fee_rate': Decimal('0'),
+                'platform_fee': Decimal('0'),
+                'seller_amount': order.total_amount,
+            }
         now = timezone.now()
         provider_reference = provider.create_payment_intent(
             data['idempotency_key'],
@@ -1914,7 +2518,9 @@ class FakeRefundTransitionInputSerializer(serializers.Serializer):
 
 class PaymentInputSerializer(serializers.Serializer):
     provider = serializers.CharField(max_length=50, allow_blank=False, trim_whitespace=True)
-    payment_method = serializers.CharField(max_length=30, allow_blank=False, trim_whitespace=True)
+    payment_method = serializers.ChoiceField(
+        choices=('FAKE', 'ONLINE', 'COD', 'BANK_TRANSFER', 'CARD', 'TEST'),
+    )
     idempotency_key = serializers.CharField(max_length=128, allow_blank=False, trim_whitespace=True)
 
 
@@ -1922,12 +2528,18 @@ def payment_payload(payment):
     return {
         'id': payment.id,
         'order_id': payment.order_id,
+        'payment_method': payment.payment_method,
+        'provider': payment.provider,
+        'reference': payment.provider_transaction_code,
         'amount': str(payment.amount),
+        'currency': payment.currency,
         'platform_fee_rate': str(payment.platform_fee_rate),
         'platform_fee': str(payment.platform_fee),
         'seller_amount': str(payment.seller_amount),
         'status': payment.status,
         'paid_at': payment.paid_at,
+        'created_at': payment.created_at,
+        'updated_at': payment.updated_at,
     }
 
 
@@ -1936,12 +2548,31 @@ class ShipmentListCreateView(APIView):
 
     def get(self, request, order_id):
         order = get_object_or_404(Order, pk=order_id)
-        if request.user.id not in (order.buyer_id, order.seller_id):
+        borrow = BorrowOrder.objects.filter(order=order).only(
+            'borrower_id',
+            'lender_id',
+            'return_tracking_code',
+        ).first()
+        participants = {order.buyer_id, order.seller_id}
+        if borrow:
+            participants.update((borrow.borrower_id, borrow.lender_id))
+        if request.user.id not in participants:
             raise PermissionDenied('Bạn không có quyền xem thông tin giao hàng.')
         shipments = order.shipments.prefetch_related('tracking_events').order_by('id')
         return Response([
             {
                 'id': shipment.id,
+                'direction': (
+                    'BORROWER_TO_OWNER'
+                    if (
+                        borrow
+                        and borrow.return_tracking_code
+                        and shipment.tracking_code == borrow.return_tracking_code
+                    )
+                    else 'OWNER_TO_BORROWER'
+                    if borrow
+                    else 'SELLER_TO_BUYER'
+                ),
                 'status': shipment.status,
                 'carrier': shipment.carrier,
                 'tracking_code': shipment.tracking_code,
@@ -1964,10 +2595,29 @@ class ShipmentListCreateView(APIView):
             Order.objects.select_for_update(),
             pk=order_id,
         )
-        if request.user.id != order.seller_id:
+        borrow = (
+            BorrowOrder.objects.filter(order=order).only('lender_id').first()
+            if order.order_type == 'BORROW'
+            else None
+        )
+        if request.user.id not in (
+            order.seller_id,
+            borrow.lender_id if borrow else None,
+        ):
             raise PermissionDenied('Chỉ người bán mới có thể tạo thông tin giao hàng.')
-        if not order.payments.filter(status='PAID').exists():
-            raise serializers.ValidationError('Chỉ đơn đã thanh toán mới được giao.')
+        if order.status not in ('CONFIRMED', 'PROCESSING'):
+            raise serializers.ValidationError(
+                'Chỉ Order đã thanh toán và chưa hoàn tất mới được tạo Shipment.',
+            )
+        paid = order.payments.filter(status='PAID').exists()
+        cod = order.payments.filter(
+            payment_method='COD',
+            status='PENDING',
+        ).exists()
+        if not paid and not cod:
+            raise serializers.ValidationError(
+                'Chỉ đơn đã thanh toán hoặc COD đang chờ thu tiền mới được giao.',
+            )
         serializer = ShipmentInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         now = timezone.now()
@@ -1976,17 +2626,19 @@ class ShipmentListCreateView(APIView):
             carrier=serializer.validated_data.get('carrier'),
             tracking_code=serializer.validated_data.get('tracking_code'),
             shipping_fee=Decimal('0'),
-            status='SHIPPED',
-            shipped_at=now,
+            status='PENDING',
+            shipped_at=None,
             currency='VND',
             created_at=now,
             updated_at=now,
         )
         ShipmentTracking.objects.create(
             shipment=shipment,
-            status='SHIPPED',
+            status='PENDING',
+            source='SYSTEM',
+            changed_by_id=request.user.id,
             location=serializer.validated_data.get('location'),
-            description='Đơn hàng đã được bàn giao cho đơn vị vận chuyển.',
+            description='Đã tạo thông tin vận chuyển; chờ PassBook tiếp nhận xử lý.',
             occurred_at=now,
             created_at=now,
         )
@@ -2002,45 +2654,44 @@ class ShipmentTrackingCreateView(APIView):
     @transaction.atomic
     def post(self, request, shipment_id):
         shipment = get_object_or_404(
-            Shipment.objects.select_related('order'),
+            Shipment.objects.select_for_update().select_related('order'),
             pk=shipment_id,
         )
-        if request.user.id != shipment.order.seller_id:
-            raise PermissionDenied('Chỉ người bán mới có thể cập nhật theo dõi giao hàng.')
         serializer = ShipmentTrackingInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         now = timezone.now()
         data = serializer.validated_data
         occurred_at = data.get('occurred_at') or now
-        latest = shipment.tracking_events.order_by(
-            '-occurred_at', '-id',
+        borrow = BorrowOrder.objects.select_for_update().filter(
+            order_id=shipment.order_id,
         ).first()
-        if latest is not None and occurred_at < latest.occurred_at:
-            raise serializers.ValidationError(
-                {'occurred_at': 'Thời điểm sự kiện không được trước sự kiện gần nhất.'},
+        return_shipment = shipment_is_return(shipment, borrow)
+        if return_shipment:
+            if request.user.id != borrow.borrower_id:
+                raise PermissionDenied(
+                    'Chỉ người mượn mới có thể cập nhật vận chuyển trả sách.',
+                )
+        elif request.user.id not in (
+            shipment.order.seller_id,
+            borrow.lender_id if borrow else None,
+        ):
+            raise PermissionDenied('Chỉ người bán mới có thể cập nhật theo dõi giao hàng.')
+        elif getattr(shipment.order, 'order_type', None) == 'SALE':
+            raise PermissionDenied(
+                'SALE Shipment status do Admin vận hành cập nhật.',
             )
-        if shipment.status == 'DELIVERED' and data['status'] != 'DELIVERED':
-            raise serializers.ValidationError(
-                'Không thể cập nhật trạng thái sau khi giao hàng hoàn tất.',
-            )
-        with transaction.atomic():
-            event = ShipmentTracking.objects.create(
-                shipment=shipment,
-                status=data['status'],
-                location=data.get('location'),
-                description=data.get('description'),
-                occurred_at=occurred_at,
-                created_at=now,
-            )
-            shipment.status = data['status']
-            if data['status'] == 'SHIPPED' and shipment.shipped_at is None:
-                shipment.shipped_at = event.occurred_at
-            if data['status'] == 'DELIVERED':
-                shipment.delivered_at = event.occurred_at
-            shipment.updated_at = now
-            shipment.save(update_fields=[
-                'status', 'shipped_at', 'delivered_at', 'updated_at',
-            ])
+        validate_shipment_transition(shipment.status, data['status'])
+        event, _old_status = update_shipment_status(
+            shipment,
+            status=data['status'],
+            source='USER',
+            changed_by=request.user,
+            borrow=borrow,
+            location=data.get('location'),
+            description=data.get('description'),
+            occurred_at=occurred_at,
+            event_model=ShipmentTracking,
+        )
         return Response({
             'id': event.id,
             'shipment_id': shipment.id,
@@ -2065,10 +2716,6 @@ class ShipmentTrackingInputSerializer(serializers.Serializer):
 
     def validate_status(self, value):
         normalized = value.upper()
-        allowed = {
-            'SHIPPED', 'PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY',
-            'DELIVERED', 'EXCEPTION', 'RETURNED',
-        }
-        if normalized not in allowed:
+        if normalized not in SHIPMENT_STATUSES:
             raise serializers.ValidationError('Trạng thái vận chuyển không hợp lệ.')
         return normalized

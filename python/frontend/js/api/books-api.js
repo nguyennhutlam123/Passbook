@@ -68,11 +68,26 @@
         },
         uploadImage: async (bookId, file, options = {}) => {
             const uploaded = await global.BooksAPI.uploadCloudinary(file);
-            return global.BooksAPI.addImage(bookId, {
-                ...uploaded,
-                is_primary: Boolean(options.isPrimary),
-                sort_order: Number(options.sortOrder) || 0,
-            });
+            try {
+                return await global.BooksAPI.addImage(bookId, {
+                    ...uploaded,
+                    is_primary: Boolean(options.isPrimary),
+                    sort_order: Number(options.sortOrder) || 0,
+                });
+            } catch (error) {
+                if (uploaded.cloudinary_public_id) {
+                    try {
+                        await global.BooksAPI.cleanupCloudinary([
+                            uploaded.cloudinary_public_id,
+                        ]);
+                    } catch (cleanupError) {
+                        throw new Error(
+                            `${error.message} Ảnh tạm chưa được dọn khỏi Cloudinary: ${cleanupError.message}`,
+                        );
+                    }
+                }
+                throw error;
+            }
         },
         requests: (query = {}) =>
             client.get(global.PassbookApiUtils.withQuery("/book-requests/", query)),

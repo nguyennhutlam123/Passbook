@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tin đăng của tôi - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell workspace-page" data-my-listings-page>
+        <section class="section-heading">
+            <div><span class="eyebrow">Quản lý</span><h1>Tin đăng của tôi</h1><p class="text-secondary">Quản lý sách bạn đang bán hoặc cho mượn.</p></div>
+            <a class="button button-primary" href="sell.html">Đăng tin mới</a>
+        </section>
+        <nav class="profile-tabs" aria-label="Lọc tin đăng">
+            <button class="button is-active" type="button" data-listing-filter="all" aria-pressed="true">Tất cả</button>
+            <button class="button button-outline" type="button" data-listing-filter="available" aria-pressed="false">Đang hoạt động</button>
+            <button class="button button-outline" type="button" data-listing-filter="inactive" aria-pressed="false">Đã bán / ẩn</button>
+        </nav>
+        <div class="book-grid profile-grid" data-my-listings-grid aria-live="polite"></div>
+        <div class="empty-state" data-my-listings-empty hidden>
+            <strong>Chưa có tin đăng nào</strong>
+            <p>Đăng bán hoặc cho mượn sách để kết nối với sinh viên khác.</p>
+            <a class="button button-primary" href="sell.html">Đăng tin mới</a>
+        </div>
+        <p class="form-error" role="alert" data-my-listings-error></p>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/my-listings.js"></script>
+</body>
+</html>

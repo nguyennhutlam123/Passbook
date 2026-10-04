@@ -453,6 +453,14 @@ class CheckoutGroup(models.Model):
 
 
 class Order(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING_PAYMENT', 'Pending payment'),
+        ('CONFIRMED', 'Confirmed'),
+        ('PROCESSING', 'Processing'),
+        ('COMPLETED', 'Completed'),
+        ('CANCELLED', 'Cancelled'),
+        ('DISPUTED', 'Disputed'),
+    ]
     order_code = models.CharField(max_length=64, unique=True)
     checkout_group = models.ForeignKey(CheckoutGroup, db_column='checkout_group_id', on_delete=models.DO_NOTHING, related_name='orders')
     buyer = models.ForeignKey(User, db_column='buyer_id', on_delete=models.DO_NOTHING, related_name='buyer_orders')
@@ -540,11 +548,28 @@ class BorrowOrder(models.Model):
 
 
 class Payment(models.Model):
+    METHOD_CHOICES = [
+        ('FAKE', 'Online / Fake Payment'),
+        ('ONLINE', 'Online Payment'),
+        ('COD', 'Cash on delivery'),
+        ('BANK_TRANSFER', 'Bank transfer'),
+        ('CARD', 'Card (legacy)'),
+        ('TEST', 'Test (legacy)'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PROCESSING', 'Processing / pending verification'),
+        ('PAID', 'Paid'),
+        ('FAILED', 'Failed'),
+        ('REFUNDED', 'Refunded'),
+        ('REVERSED', 'Reversed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
     checkout_group = models.ForeignKey(CheckoutGroup, db_column='checkout_group_id', on_delete=models.DO_NOTHING, related_name='payments')
     order = models.ForeignKey(Order, db_column='order_id', on_delete=models.DO_NOTHING, related_name='payments')
     payer = models.ForeignKey(User, db_column='payer_id', on_delete=models.DO_NOTHING, related_name='payments')
     provider = models.CharField(max_length=50)
-    payment_method = models.CharField(max_length=30)
+    payment_method = models.CharField(max_length=30, choices=METHOD_CHOICES)
     provider_transaction_code = models.CharField(max_length=150, null=True, blank=True)
     payment_purpose = models.CharField(max_length=30, default='CHECKOUT')
     amount = models.DecimalField(max_digits=19, decimal_places=4)
@@ -552,7 +577,7 @@ class Payment(models.Model):
     platform_fee = models.DecimalField(max_digits=19, decimal_places=4, default=0)
     seller_amount = models.DecimalField(max_digits=19, decimal_places=4)
     currency = models.CharField(max_length=3, default='VND')
-    status = models.CharField(max_length=20, default='PENDING')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     idempotency_key = models.CharField(max_length=128)
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
@@ -584,6 +609,8 @@ class Shipment(models.Model):
 class ShipmentTracking(models.Model):
     shipment = models.ForeignKey(Shipment, db_column='shipment_id', on_delete=models.DO_NOTHING, related_name='tracking_events')
     status = models.CharField(max_length=30)
+    source = models.CharField(max_length=30, default='LEGACY')
+    changed_by_id = models.BigIntegerField(null=True, blank=True)
     location = models.CharField(max_length=255, null=True, blank=True)
     description = models.TextField(null=True, blank=True)
     occurred_at = models.DateTimeField()

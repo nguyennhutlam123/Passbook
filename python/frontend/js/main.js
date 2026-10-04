@@ -70,7 +70,7 @@ function showModal(content) {
     });
 }
 
-function openBorrowReservationDialog({bookId, listingId, title}) {
+function openBorrowReservationDialog({bookId, listingId, title, onCreated}) {
     if (!PassbookGuards.requireAuth()) return;
     const formatLocalDateTime = (date) =>
         new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
@@ -82,7 +82,7 @@ function openBorrowReservationDialog({bookId, listingId, title}) {
     );
     showModal(`<form data-borrow-reservation-form>
         <button class="modal-close" type="button" data-modal-close>Đóng</button>
-        <h2>Đăng ký mượn sách</h2>
+        <h2>Đặt mượn sách</h2>
         <p><strong>${escapeHtml(title || "Giáo trình")}</strong></p>
         <label class="form-label" for="borrow-request-expiry">Yêu cầu có hiệu lực đến</label>
         <input class="form-control" id="borrow-request-expiry" name="expires_at" type="datetime-local" min="${minimumExpiry}" value="${defaultExpiry}" required>
@@ -90,7 +90,7 @@ function openBorrowReservationDialog({bookId, listingId, title}) {
         <p class="form-error" data-borrow-reservation-error></p>
         <div class="modal-actions">
             <button class="button button-outline" type="button" data-modal-close>Hủy</button>
-            <button class="button button-primary" type="submit">Gửi yêu cầu mượn</button>
+            <button class="button button-primary" type="submit">Xác nhận đặt mượn</button>
         </div>
     </form>`);
     const form = document.querySelector("[data-borrow-reservation-form]");
@@ -108,8 +108,14 @@ function openBorrowReservationDialog({bookId, listingId, title}) {
             const reservation = await ReservationsAPI.create(bookId, {
                 expires_at: expiresAt.toISOString(),
             });
-            closeModal();
-            showToast(`Đã gửi yêu cầu mượn #${reservation.id}. Theo dõi trạng thái trong Giao dịch.`);
+            onCreated?.(reservation);
+            showModal(`<section class="borrow-request-success">
+                <button class="modal-close" type="button" data-modal-close>Đóng</button>
+                <span class="success-panel__icon" aria-hidden="true">✓</span>
+                <h2>Đã gửi yêu cầu mượn</h2>
+                <p>Phiếu mượn #${Number(reservation.id)} đã được tạo.</p>
+                <a class="button button-primary" href="borrow-tickets.html?reservation_id=${encodeURIComponent(reservation.id)}">Xem phiếu mượn mới</a>
+            </section>`);
         } catch (requestError) {
             error.textContent = requestError.message;
         } finally {
@@ -220,7 +226,9 @@ function setupNotifications() {
                         count.hidden = unread === 0;
                     }
                     if (notification.reference_id) {
-                        window.location.href = `book-detail.html?id=${encodeURIComponent(notification.reference_id)}`;
+                        window.location.href = notification.entity_type === "ORDER"
+                            ? `orders.html?order_id=${encodeURIComponent(notification.reference_id)}`
+                            : `book-detail.html?id=${encodeURIComponent(notification.reference_id)}`;
                     } else {
                         window.location.href = "notifications.html";
                     }
@@ -315,19 +323,59 @@ function bindFavoriteButtons(root = document) {
 function renderHomepage() {
     const newGrid = document.querySelector("[data-new-books]");
     const collections = document.querySelector("[data-subject-collections]");
-    if (!newGrid || !collections) return;
-    const subjectSections = [
-        {key: "Công nghệ thông tin", title: "Công nghệ thông tin", description: "Giáo trình lập trình, dữ liệu và công nghệ.", tone: "blue"},
-        {key: "Vật lý", title: "Vật lý", description: "Tài liệu nền tảng cho những khám phá tự nhiên.", tone: "orange"},
-        {key: "Toán", title: "Toán học", description: "Từ giải tích đến xác suất và tư duy logic.", tone: "green"},
-        {key: "Hóa học", title: "Hóa học", description: "Giáo trình và tài liệu thực hành.", tone: "purple"},
-        {key: "Ngoại ngữ", title: "Ngoại ngữ", description: "Mở rộng vốn từ, mở rộng thế giới.", tone: "pink"},
+    const borrowGrid = document.querySelector("[data-home-borrow]");
+    if (!newGrid || !collections || !borrowGrid) return;
+    BooksAPI.lendListings({page_size: 4}).then((data) => {
+        const listings = data.results || [];
+        const books = listings.map((listing) => ({
+            ...listing.book,
+            id: listing.book_id,
+            title: listing.title,
+            description: listing.description,
+            price: listing.rental_fee,
+            condition_status: listing.condition_status,
+            primary_image: listing.primary_image
+                ? {image_url: listing.primary_image}
+                : null,
+            seller: listing.seller,
+            listing_type: "BORROW",
+            listing_id: listing.id,
+            borrow_terms: listing.borrow_terms,
+            deposit_amount: listing.deposit_amount,
+        }));
+        borrowGrid.replaceChildren(...(
+            books.length
+                ? books.map((book) => {
+                    const wrapper = document.createElement("div");
+                    wrapper.innerHTML = renderBookCard(book);
+                    return wrapper.firstElementChild;
+                })
+                : [PassbookCommonComponents.emptyStateElement(
+                    "Chưa có sách cho mượn.",
+                    "Quay lại sau để xem các tin mượn mới.",
+                )]
+        ));
+        attachImageFallbacks(borrowGrid);
+    }).catch((error) => {
+        borrowGrid.replaceChildren(PassbookCommonComponents.emptyStateElement(
+            "Không thể tải sách cho mượn.",
+            error.message,
+        ));
+    });
+    const categorySections = [
+        {name: "Tiểu thuyết", slug: "tieu-thuyet", description: "Những câu chuyện và thế giới giàu cảm xúc.", tone: "blue"},
+        {name: "Thơ", slug: "tho", description: "Tuyển tập thơ và những vần điệu đáng nhớ.", tone: "orange"},
+        {name: "Kịch", slug: "kich", description: "Tác phẩm sân khấu và kịch bản.", tone: "green"},
+        {name: "Sách giáo khoa", slug: "sach-giao-khoa", description: "Sách học tập theo chương trình giáo dục.", tone: "purple"},
+        {name: "Giáo trình", slug: "giao-trinh", description: "Giáo trình và sách chuyên ngành.", tone: "pink"},
+        {name: "Tài liệu", slug: "tai-lieu", description: "Tài liệu tham khảo và học tập.", tone: "blue"},
+        {name: "Truyện tranh", slug: "truyen-tranh", description: "Truyện tranh cho nhiều lứa tuổi.", tone: "orange"},
     ];
     const renderCollection = (section, books) => {
         if (!books.length) return "";
-        const query = encodeURIComponent(section.key);
-        return `<section class="page-shell collection-section collection-section--${section.tone}" aria-labelledby="collection-${section.tone}">
-            <div class="collection-heading"><div><span class="eyebrow">${section.key}</span><h2 id="collection-${section.tone}">${section.title}</h2><p>${section.description}</p></div><a class="text-link" href="books.html?q=${query}">Xem tất cả <span>→</span></a></div>
+        const query = encodeURIComponent(section.slug);
+        return `<section class="page-shell collection-section collection-section--${section.tone}" aria-labelledby="collection-${section.slug}">
+            <div class="collection-heading"><div><span class="eyebrow">${section.name}</span><h2 id="collection-${section.slug}">${section.name}</h2><p>${section.description}</p></div><a class="text-link" href="books.html?category_slug=${query}">Xem tất cả <span>→</span></a></div>
             <div class="book-grid book-grid--storefront">${books.slice(0, 4).map(renderBookCard).join("")}</div>
         </section>`;
     };
@@ -341,7 +389,10 @@ function renderHomepage() {
         }
         const books = data.results || [];
         newGrid.innerHTML = books.slice(0, 4).map(renderBookCard).join("");
-        collections.innerHTML = subjectSections.map((section) => renderCollection(section, books.filter((book) => (book.subject?.name || book.subject || "").toLowerCase().includes(section.key.toLowerCase())))).join("");
+        collections.innerHTML = categorySections.map((section) => renderCollection(
+            section,
+            books.filter((book) => book.category?.name === section.name),
+        )).join("");
         bindFavoriteButtons(document);
         attachImageFallbacks(document);
     }).catch((error) => {
@@ -377,6 +428,13 @@ function renderSiteChrome() {
     toggle?.addEventListener("click", () => {
         const isOpen = menu.classList.toggle("is-open");
         toggle.setAttribute("aria-expanded", String(isOpen));
+    });
+    document.querySelector(".nav-more")?.addEventListener("click", (event) => {
+        if (event.target.closest("a, button")) event.currentTarget.open = false;
+    });
+    document.addEventListener("click", (event) => {
+        const details = document.querySelector(".nav-more");
+        if (details?.open && !details.contains(event.target)) details.open = false;
     });
 
     document.querySelector("[data-logout]")?.addEventListener("click", async () => {

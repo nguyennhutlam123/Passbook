@@ -200,7 +200,7 @@ class Command(BaseCommand):
         category = self._once(Category, {'slug': PREFIX + 'books'}, {
             'name': 'Acceptance Books',
             'description': 'Synthetic category',
-            'status': 'ACTIVE',
+            'status': 'INACTIVE',
             'created_at': now,
             'updated_at': now,
         })

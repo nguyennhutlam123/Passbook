@@ -11,7 +11,7 @@ from rest_framework.exceptions import APIException
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
-from users.models import OtpVerification
+from users.models import OtpVerification, User
 
 
 class OtpVerificationError(APIException):
@@ -38,6 +38,8 @@ def issue_otp(*, target, channel, purpose, user=None):
     expires_in = timedelta(seconds=settings.OTP_LIFETIME_SECONDS)
 
     with transaction.atomic():
+        if user is not None:
+            user = User.objects.select_for_update().get(pk=user.pk)
         previous = (
             OtpVerification.objects.select_for_update()
             .filter(target=target, purpose=purpose)

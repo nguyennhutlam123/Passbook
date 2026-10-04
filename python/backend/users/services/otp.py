@@ -1,17 +1,16 @@
 import secrets
-import smtplib
 from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.core.mail import send_mail
 from django.db import transaction
-from rest_framework import status
-from rest_framework.exceptions import APIException
 from django.utils import timezone
 from django.utils.module_loading import import_string
+from rest_framework import status
+from rest_framework.exceptions import APIException
 
 from users.models import OtpVerification, User
+from .email import EmailProviderError, send_email
 
 
 class OtpVerificationError(APIException):
@@ -139,17 +138,13 @@ def _deliver_otp(*, target, channel, purpose, code):
     )
     if channel == 'EMAIL':
         try:
-            sent = send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [target],
-                fail_silently=False,
+            send_email(
+                recipient=target,
+                subject=subject,
+                text=message,
             )
-        except (OSError, smtplib.SMTPException) as exc:
+        except EmailProviderError as exc:
             raise OtpDeliveryError('Không thể gửi mã xác minh.') from exc
-        if sent != 1:
-            raise OtpDeliveryError('Không thể gửi mã xác minh.')
         return
 
     backend_path = settings.PASSBOOK_SMS_DELIVERY_BACKEND

@@ -140,6 +140,128 @@ class _OtpManager:
         return row
 
 
+class ResendEmailServiceTests(SimpleTestCase):
+    @override_settings(
+        EMAIL_API_KEY='test-api-key',
+        EMAIL_API_TIMEOUT=7,
+        DEFAULT_FROM_EMAIL='Passbook <no-reply@example.test>',
+    )
+    def test_send_email_uses_resend_https_api(self):
+        import json
+
+        from users.services.email import send_email
+
+        with patch('users.services.email.urllib.request.build_opener') as build_opener:
+            opener = build_opener.return_value
+            opener.open.return_value.__enter__.return_value.status = 200
+            send_email(
+                recipient='student@example.test',
+                subject='Passbook verification code',
+                text='Your code is 123456.',
+            )
+
+        build_opener.assert_called_once()
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, 'https://api.resend.com/emails')
+        self.assertEqual(request.method, 'POST')
+        self.assertEqual(
+            request.get_header('Authorization'),
+            'Bearer test-api-key',
+        )
+        self.assertEqual(request.get_header('User-agent'), 'Passbook/1.0')
+        self.assertEqual(opener.open.call_args.kwargs['timeout'], 7)
+        self.assertEqual(json.loads(request.data), {
+            'from': 'Passbook <no-reply@example.test>',
+            'to': ['student@example.test'],
+            'subject': 'Passbook verification code',
+            'text': 'Your code is 123456.',
+        })
+
+    @override_settings(
+        EMAIL_API_KEY='test-api-key',
+        EMAIL_API_TIMEOUT=10,
+        DEFAULT_FROM_EMAIL='no-reply@example.test',
+    )
+    def test_provider_4xx_and_5xx_are_delivery_errors(self):
+        from urllib.error import HTTPError
+
+        from users.services.email import EmailProviderError, send_email
+
+        for status_code in (400, 500):
+            with self.subTest(status_code=status_code), patch(
+                'users.services.email.urllib.request.build_opener',
+            ) as build_opener:
+                build_opener.return_value.open.side_effect = HTTPError(
+                    'https://api.resend.com/emails',
+                    status_code,
+                    'provider error',
+                    hdrs=None,
+                    fp=None,
+                )
+                with self.assertRaises(EmailProviderError) as raised:
+                    send_email(
+                        recipient='student@example.test',
+                        subject='Verification',
+                        text='Code 123456',
+                    )
+                self.assertIn(str(status_code), str(raised.exception))
+                self.assertNotIn('test-api-key', str(raised.exception))
+
+    @override_settings(
+        EMAIL_API_KEY='test-api-key',
+        EMAIL_API_TIMEOUT=10,
+        DEFAULT_FROM_EMAIL='no-reply@example.test',
+    )
+    def test_provider_timeout_is_delivery_error(self):
+        from users.services.email import EmailProviderError, send_email
+
+        with patch(
+            'users.services.email.urllib.request.build_opener',
+        ) as build_opener:
+            build_opener.return_value.open.side_effect = TimeoutError('timed out')
+            with self.assertRaises(EmailProviderError):
+                send_email(
+                    recipient='student@example.test',
+                    subject='Verification',
+                    text='Code 123456',
+                )
+        build_opener.return_value.open.assert_called_once()
+
+    @override_settings(
+        EMAIL_API_KEY='',
+        EMAIL_API_TIMEOUT=10,
+        DEFAULT_FROM_EMAIL='no-reply@example.test',
+    )
+    def test_missing_api_key_fails_without_http_request(self):
+        from users.services.email import EmailProviderError, send_email
+
+        with patch('users.services.email.urllib.request.build_opener') as build_opener:
+            with self.assertRaises(EmailProviderError):
+                send_email(
+                    recipient='student@example.test',
+                    subject='Verification',
+                    text='Code 123456',
+                )
+        build_opener.assert_not_called()
+
+    @override_settings(
+        EMAIL_API_KEY='test-api-key',
+        EMAIL_API_TIMEOUT=0,
+        DEFAULT_FROM_EMAIL='no-reply@example.test',
+    )
+    def test_invalid_timeout_fails_without_http_request(self):
+        from users.services.email import EmailProviderError, send_email
+
+        with patch('users.services.email.urllib.request.build_opener') as build_opener:
+            with self.assertRaises(EmailProviderError):
+                send_email(
+                    recipient='student@example.test',
+                    subject='Verification',
+                    text='Code 123456',
+                )
+        build_opener.assert_not_called()
+
+
 class OtpServiceTests(SimpleTestCase):
     def setUp(self):
         self.manager = _OtpManager()
@@ -225,7 +347,7 @@ class OtpServiceTests(SimpleTestCase):
         from .services.otp import issue_otp
 
         with patch('users.services.otp.secrets.randbelow', return_value=271):
-            with patch('users.services.otp.send_mail', return_value=1) as send_mail:
+            with patch('users.services.otp.send_email') as send_email:
                 row = issue_otp(
                     target='Student@Example.com',
                     channel='EMAIL',
@@ -235,7 +357,12 @@ class OtpServiceTests(SimpleTestCase):
         self.assertEqual(row.status, 'PENDING')
         self.assertTrue(check_password('000271', row.otp_hash))
         self.assertNotEqual(row.otp_hash, '000271')
-        self.assertEqual(send_mail.call_args.args[3], ['student@example.com'])
+        send_email.assert_called_once()
+        self.assertEqual(
+            send_email.call_args.kwargs['recipient'],
+            'student@example.com',
+        )
+        self.assertIn('000271', send_email.call_args.kwargs['text'])
         serializer = OtpVerifySerializer(data={
             'target': 'student@example.com',
             'purpose': 'REGISTER',
@@ -243,6 +370,34 @@ class OtpServiceTests(SimpleTestCase):
         })
         self.assertTrue(serializer.is_valid())
         self.assertNotIn('otp', serializer.data)
+
+    @override_settings(
+        EMAIL_API_KEY='test-api-key',
+        EMAIL_API_TIMEOUT=10,
+        DEFAULT_FROM_EMAIL='no-reply@example.test',
+    )
+    def test_email_provider_failure_becomes_otp_delivery_error(self):
+        from urllib.error import HTTPError
+
+        from .services.otp import OtpDeliveryError, issue_otp
+
+        error = HTTPError(
+            'https://api.resend.com/emails',
+            500,
+            'provider error',
+            hdrs=None,
+            fp=None,
+        )
+        with patch('users.services.otp.secrets.randbelow', return_value=123456), patch(
+            'users.services.email.urllib.request.build_opener',
+        ) as build_opener:
+            build_opener.return_value.open.side_effect = error
+            with self.assertRaises(OtpDeliveryError):
+                issue_otp(
+                    target='student@example.com',
+                    channel='EMAIL',
+                    purpose='REGISTER',
+                )
 
     @override_settings(
         OTP_LIFETIME_SECONDS=300,
@@ -352,7 +507,7 @@ class OtpServiceTests(SimpleTestCase):
     def test_resend_rate_limits_and_invalidates_previous_otp(self):
         from .services.otp import OtpRateLimitError, issue_otp
 
-        with patch('users.services.otp.send_mail', return_value=1), patch(
+        with patch('users.services.otp.send_email'), patch(
             'users.services.otp.secrets.randbelow',
             side_effect=(111111, 222222),
         ):
@@ -402,7 +557,7 @@ class OtpServiceTests(SimpleTestCase):
         handler = Capture()
         logger.addHandler(handler)
         try:
-            with patch('users.services.otp.send_mail', return_value=1), patch(
+            with patch('users.services.otp.send_email'), patch(
                 'users.services.otp.secrets.randbelow',
                 return_value=654321,
             ):
@@ -465,6 +620,70 @@ class OtpApiTests(SimpleTestCase):
             response = OtpRequestView.as_view()(request)
         self.assertEqual(response.status_code, 401)
         issue.assert_not_called()
+
+    def test_register_keeps_success_contract_after_otp_delivery(self):
+        from users.api_views import RegisterView
+
+        user = SimpleNamespace(email='student@example.com')
+        serializer = Mock()
+        serializer.save.return_value = user
+        registered_user = Mock()
+        registered_user.data = {'email': user.email}
+        request = self.factory.post('/api/auth/register/', {
+            'name': 'Test Student',
+            'email': user.email,
+            'password': 'strong-test-password',
+        }, format='json')
+        unwrapped_post = RegisterView.post.__wrapped__
+
+        with patch.object(RegisterView, 'post', unwrapped_post), patch(
+            'users.api_views.RegisterSerializer',
+            return_value=serializer,
+        ), patch(
+            'users.api_views.issue_otp',
+        ) as issue, patch(
+            'users.api_views.RegisteredUserSerializer',
+            return_value=registered_user,
+        ):
+            response = RegisterView.as_view()(request)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['verification_required'], True)
+        self.assertEqual(response.data['target'], user.email)
+        self.assertEqual(response.data['user'], {'email': user.email})
+        issue.assert_called_once_with(
+            target=user.email,
+            channel='EMAIL',
+            purpose='REGISTER',
+            user=user,
+        )
+
+    def test_register_returns_service_unavailable_when_otp_delivery_fails(self):
+        from users.api_views import RegisterView
+        from .services.otp import OtpDeliveryError
+
+        user = SimpleNamespace(email='student@example.com')
+        serializer = Mock()
+        serializer.save.return_value = user
+        request = self.factory.post('/api/auth/register/', {
+            'name': 'Test Student',
+            'email': user.email,
+            'password': 'strong-test-password',
+        }, format='json')
+        unwrapped_post = RegisterView.post.__wrapped__
+
+        with patch.object(RegisterView, 'post', unwrapped_post), patch(
+            'users.api_views.RegisterSerializer',
+            return_value=serializer,
+        ), patch(
+            'users.api_views.issue_otp',
+            side_effect=OtpDeliveryError(),
+        ):
+            response = RegisterView.as_view()(request)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('message', response.data)
+        serializer.is_valid.assert_called_once_with(raise_exception=True)
 
     def test_register_verification_activates_pending_user_without_returning_code(self):
         verification = SimpleNamespace(user_id=42)
@@ -632,7 +851,7 @@ class OtpApiTests(SimpleTestCase):
         with patch.object(OtpVerification, 'objects', manager), patch(
             'users.services.otp.transaction.atomic',
             return_value=nullcontext(),
-        ), patch('users.services.otp.send_mail', return_value=1), patch(
+        ), patch('users.services.otp.send_email'), patch(
             'users.services.otp.import_string',
             return_value=lambda *args: True,
         ), patch(

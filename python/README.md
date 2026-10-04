@@ -48,9 +48,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. Với cấu hình local, có thể sao chép file mẫu thành `backend/.env`, điền Gmail App Password vào đó rồi nạp file khi chạy backend. Không commit file `.env`.
+Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. Email OTP đăng ký/xác minh dùng Resend HTTPS API; cần `EMAIL_API_KEY`, một `DEFAULT_FROM_EMAIL` thuộc domain đã xác minh trên Resend, và có thể đặt `EMAIL_API_TIMEOUT` (mặc định 10 giây). Không commit file `.env`.
 
-Email xác nhận đơn hàng và email khi quản trị viên đổi trạng thái đơn dùng SMTP hiện có. Cần cấu hình `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL`; nếu thiếu thông tin SMTP, thông báo trong ứng dụng vẫn được tạo nhưng backend ghi rõ lỗi gửi email vào log.
+Email xác nhận đơn hàng và email khi quản trị viên đổi trạng thái đơn vẫn dùng SMTP hiện có, nên cần `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL` cho các email đó. `EMAIL_TIMEOUT` (mặc định 10 giây) giới hạn thời gian chờ SMTP này. Render Free chặn outbound SMTP; việc chuyển OTP sang HTTPS không chuyển các email thông báo đơn hàng.
 
 ## Chạy backend
 

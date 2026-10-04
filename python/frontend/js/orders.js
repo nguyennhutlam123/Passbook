@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const error = page.querySelector("[data-orders-error]");
     const refreshButton = page.querySelector("[data-orders-refresh]");
     let loading = false;
+    let renderedOrdersSignature = null;
 
     const statusLabel = (status) => ({
         PENDING_PAYMENT: "Chờ thanh toán",
@@ -21,7 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
         PICKED_UP: "Đã lấy hàng",
         IN_TRANSIT: "Đang vận chuyển",
         OUT_FOR_DELIVERY: "Đang giao",
-        DELIVERED: "Đã giao",
+        DELIVERED: "Đã giao thành công",
         EXCEPTION: "Có sự cố",
         RETURNED: "Đã hoàn hàng",
     })[status] || status || "—";
@@ -66,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
             item.className = index < currentStep
                 ? "is-complete"
                 : index === currentStep ? "is-current" : "";
+            if (index === currentStep) item.setAttribute("aria-current", "step");
             item.textContent = step;
             tracker.append(item);
         });
@@ -108,7 +110,6 @@ document.addEventListener("DOMContentLoaded", () => {
         summaryLine.textContent = [
             `Trạng thái: ${statusLabel(data.status)}`,
             `Tạm tính: ${formatPrice(Number(data.subtotal) || 0)}`,
-            data.platform_fee ? `Phí nền tảng: ${formatPrice(Number(data.platform_fee) || 0)}` : "",
             `Phí vận chuyển: ${formatPrice(Number(data.shipping_fee) || 0)}`,
             `Tổng tiền: ${formatPrice(Number(data.total_amount) || 0)}`,
         ].filter(Boolean).join(" · ");
@@ -127,8 +128,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 payment.status,
                 formatPrice(Number(payment.amount) || 0),
                 payment.reference ? `Ref ${payment.reference}` : "",
-                payment.platform_fee ? `Phí ${formatPrice(Number(payment.platform_fee) || 0)}` : "",
-                payment.seller_amount ? `Seller ${formatPrice(Number(payment.seller_amount) || 0)}` : "",
             ].filter(Boolean).join(" · ");
             payments.append(paymentLine);
         });
@@ -283,20 +282,32 @@ document.addEventListener("DOMContentLoaded", () => {
         if (refreshButton) refreshButton.disabled = true;
         try {
             const data = await OrdersAPI.list({page_size: 50});
-            const orders = data.results || [];
-            list.replaceChildren(...(orders.length
-                ? orders.map(renderCard)
-                : [PassbookCommonComponents.emptyStateElement(
-                    "Chưa có đơn hàng.",
-                    "Các đơn BUY và BORROW sẽ xuất hiện tại đây.",
-                )]));
-            const requestedOrderId = new URLSearchParams(location.search).get("order_id");
-            if (requestedOrderId) {
-                const orderCard = [...list.querySelectorAll("[data-order-id]")]
-                    .find((item) => item.dataset.orderId === requestedOrderId);
-                if (orderCard) {
-                    orderCard.classList.add("is-highlighted");
-                    orderCard.scrollIntoView({behavior: "smooth", block: "center"});
+            const signature = JSON.stringify(data);
+            if (signature !== renderedOrdersSignature) {
+                const orders = data.results || [];
+                if (orders.length) {
+                    list.replaceChildren(...orders.map(renderCard));
+                } else {
+                    const empty = PassbookCommonComponents.emptyStateElement(
+                        "Chưa có đơn hàng.",
+                        "Các đơn mua và mượn sách sẽ xuất hiện tại đây.",
+                    );
+                    const browse = document.createElement("a");
+                    browse.className = "button button-primary";
+                    browse.href = "books.html";
+                    browse.textContent = "Khám phá sách";
+                    empty.append(browse);
+                    list.replaceChildren(empty);
+                }
+                renderedOrdersSignature = signature;
+                const requestedOrderId = new URLSearchParams(location.search).get("order_id");
+                if (requestedOrderId) {
+                    const orderCard = [...list.querySelectorAll("[data-order-id]")]
+                        .find((item) => item.dataset.orderId === requestedOrderId);
+                    if (orderCard) {
+                        orderCard.classList.add("is-highlighted");
+                        orderCard.scrollIntoView({behavior: "smooth", block: "center"});
+                    }
                 }
             }
         } catch (requestError) {
@@ -312,13 +323,46 @@ document.addEventListener("DOMContentLoaded", () => {
             if (refreshButton) refreshButton.disabled = false;
         }
     };
+    let resumeRefreshAt = 0;
+    const refreshOnResume = () => {
+        const now = Date.now();
+        if (document.visibilityState !== "visible" || now - resumeRefreshAt < 1000) return;
+        resumeRefreshAt = now;
+        void load({quiet: true});
+    };
+    const onVisibilityChange = () => {
+        if (document.visibilityState === "visible") refreshOnResume();
+    };
+    let pollingTimer = null;
+    const startPolling = () => {
+        if (pollingTimer !== null) return;
+        pollingTimer = window.setInterval(() => {
+            if (document.visibilityState === "visible") void load({quiet: true});
+        }, 15000);
+    };
+    const stopPolling = () => {
+        if (pollingTimer === null) return;
+        window.clearInterval(pollingTimer);
+        pollingTimer = null;
+    };
+    const onPageHide = (event) => {
+        stopPolling();
+        if (!event.persisted) {
+            window.removeEventListener("focus", refreshOnResume);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+        }
+    };
+    const onPageShow = (event) => {
+        if (!event.persisted) return;
+        window.addEventListener("focus", refreshOnResume);
+        document.addEventListener("visibilitychange", onVisibilityChange);
+        startPolling();
+    };
+    startPolling();
     refreshButton?.addEventListener("click", () => void load());
-    window.addEventListener("focus", () => void load({quiet: true}));
-    document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") void load({quiet: true});
-    });
-    window.setInterval(() => {
-        if (document.visibilityState === "visible") void load({quiet: true});
-    }, 15000);
+    window.addEventListener("focus", refreshOnResume);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     void load();
 });

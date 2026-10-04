@@ -10,6 +10,17 @@ BOOK_CATEGORIES = (
     ('tai-lieu', 'Tài liệu', 'Tài liệu học tập và tham khảo'),
     ('truyen-tranh', 'Truyện tranh', 'Truyện tranh cho nhiều lứa tuổi'),
 )
+BOOK_CATEGORY_SLUGS = tuple(slug for slug, _name, _description in BOOK_CATEGORIES)
+
+
+def is_supported_book_category(category):
+    return (
+        category is None
+        or (
+            category.status == 'ACTIVE'
+            and category.slug in BOOK_CATEGORY_SLUGS
+        )
+    )
 
 
 def category_order_expression():

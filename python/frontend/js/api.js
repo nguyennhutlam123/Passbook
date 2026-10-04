@@ -18,10 +18,20 @@
     ]);
     const timeoutMs = 30000;
     let refreshPromise = null;
+    let sessionExpiryHandled = false;
+    const inFlightGetRequests = new Map();
 
     function urlFor(path) {
         if (/^https?:\/\//i.test(path)) return path;
         return `${API_BASE_URL}/${String(path).replace(/^\/+/, "")}`;
+    }
+
+    function isApiUrl(url) {
+        const requestUrl = new URL(url);
+        const apiBaseUrl = new URL(API_BASE_URL);
+        const apiBasePath = apiBaseUrl.pathname.replace(/\/+$/, "");
+        return requestUrl.origin === apiBaseUrl.origin
+            && requestUrl.pathname.startsWith(`${apiBasePath}/`);
     }
 
     async function parseResponse(response) {
@@ -96,6 +106,8 @@
     }
 
     function onSessionExpired() {
+        if (sessionExpiryHandled) return;
+        sessionExpiryHandled = true;
         global.PassbookAuth.clearSession("refresh_failed");
         const route = global.PassbookRouter.routeFor();
         if (route.access === "authenticated" || route.access === "role") {
@@ -103,15 +115,14 @@
         }
     }
 
-    async function request(path, options = {}) {
+    async function performRequest(path, options = {}) {
         const url = urlFor(path);
         const method = (options.method || "GET").toUpperCase();
         const body = options.body;
         const requestUrl = new URL(url);
         const apiBaseUrl = new URL(API_BASE_URL);
         const apiBasePath = apiBaseUrl.pathname.replace(/\/+$/, "");
-        const isApiRequest = requestUrl.origin === apiBaseUrl.origin
-            && requestUrl.pathname.startsWith(`${apiBasePath}/`);
+        const isApiRequest = isApiUrl(url);
         const headers = new Headers(options.headers || {});
         const isFormData = body instanceof FormData;
         if (body !== undefined && body !== null && !isFormData && !headers.has("Content-Type")) {
@@ -131,6 +142,7 @@
         }
 
         let response = await rawRequest(url, init);
+        let retriedAfterRefresh = false;
         const apiPath = isApiRequest
             ? requestUrl.pathname.slice(apiBasePath.length) || "/"
             : "";
@@ -150,8 +162,10 @@
             const retryHeaders = new Headers(headers);
             retryHeaders.set("Authorization", `Bearer ${access}`);
             response = await rawRequest(url, {...init, headers: retryHeaders});
+            retriedAfterRefresh = true;
         }
 
+        if (response.status === 401 && retriedAfterRefresh) onSessionExpired();
         const payload = await parseResponse(response);
         if (!response.ok) {
             throw new global.PassbookErrors.ApiError(
@@ -160,6 +174,33 @@
             );
         }
         return payload;
+    }
+
+    async function request(path, options = {}) {
+        const method = (options.method || "GET").toUpperCase();
+        if (method !== "GET" || options.signal || options.body !== undefined) {
+            return performRequest(path, options);
+        }
+
+        const url = urlFor(path);
+        if (!isApiUrl(url)) return performRequest(path, options);
+
+        const headers = [...new Headers(options.headers || {}).entries()]
+            .sort(([left], [right]) => left.localeCompare(right));
+        const accessToken = options.auth === false
+            ? ""
+            : global.PassbookAuth.getAccessToken() || "";
+        const key = JSON.stringify([
+            url, accessToken, headers, options.credentials, options.cache, options.mode,
+        ]);
+        let pending = inFlightGetRequests.get(key);
+        if (!pending) {
+            pending = performRequest(path, options).finally(() => {
+                inFlightGetRequests.delete(key);
+            });
+            inFlightGetRequests.set(key, pending);
+        }
+        return pending;
     }
 
     const api = Object.freeze({

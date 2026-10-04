@@ -19,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const checkoutKeyStorage = "passbook.checkout.idempotencyKey";
     let selectedCartItemId = null;
     let buyNowProcessed = false;
+    let checkoutSubmitting = false;
     let orderPage = 1;
     let reservationPage = 1;
     let borrowPage = 1;
@@ -99,7 +100,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     const lines = [
                         `${quote.items[0]?.title || item.title} · ${money(quote.items[0]?.subtotal || 0)}`,
                         `Tạm tính: ${money(quote.subtotal)}`,
-                        `Phí nền tảng 10%: ${money(quote.platform_fee || 0)}`,
+                        "Phí nền tảng người mua: 0đ",
                         `Phí vận chuyển: ${money(quote.shipping_total)}`,
                         `Tổng tiền: ${money(quote.total_amount)}`,
                     ];
@@ -125,7 +126,16 @@ document.addEventListener("DOMContentLoaded", () => {
             const items = Array.isArray(cart.items) ? cart.items : [];
             const buyNowListingId = new URLSearchParams(location.search).get("buy_now");
             if (!items.length) {
-                setMessage(cartItems, "Giỏ hàng đang trống.");
+                const empty = PassbookCommonComponents.emptyStateElement(
+                    "Giỏ hàng đang trống.",
+                    "Khám phá sách để thêm những cuốn bạn cần.",
+                );
+                const browse = document.createElement("a");
+                browse.className = "button button-primary";
+                browse.href = "books.html";
+                browse.textContent = "Khám phá sách";
+                empty.append(browse);
+                cartItems.replaceChildren(empty);
                 cartTotal.textContent = "";
                 checkoutForm.hidden = true;
                 selectedCartItemId = null;
@@ -164,7 +174,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 checkoutForm.hidden = true;
             }
         } catch (error) {
-            setMessage(cartItems, error.message, "form-error");
+            const failure = PassbookCommonComponents.emptyStateElement(
+                "Không thể tải giỏ hàng.",
+                "Kiểm tra kết nối rồi thử lại.",
+            );
+            const retry = document.createElement("button");
+            retry.className = "button button-outline";
+            retry.type = "button";
+            retry.textContent = "Thử lại";
+            retry.addEventListener("click", () => void loadCart());
+            failure.append(retry);
+            cartItems.replaceChildren(failure);
+            cartError.textContent = error.message;
             checkoutForm.hidden = true;
         }
     };
@@ -199,6 +220,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     checkoutForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (checkoutSubmitting) return;
         if (selectedCartItemId === null) {
             cartError.textContent = "Chọn sản phẩm cần mua trong giỏ hàng.";
             return;
@@ -233,6 +255,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const submit = checkoutForm.querySelector("button[type='submit']");
+        checkoutSubmitting = true;
         submit.disabled = true;
         cartError.textContent = "";
         const payload = {
@@ -290,6 +313,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 ? error.payload.detail
                 : error.message;
         } finally {
+            checkoutSubmitting = false;
             submit.disabled = false;
         }
     });

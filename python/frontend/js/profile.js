@@ -12,8 +12,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const verified = document.querySelector(".verified");
     if (verified) {
         verified.hidden = !user.is_verified;
-        verified.setAttribute("aria-label", user.is_verified ? "Đã xác minh" : "Chưa xác minh");
-        verified.title = user.is_verified ? "Đã xác minh" : "Chưa xác minh";
+        verified.setAttribute("aria-label", "Tài khoản xác thực");
+        verified.removeAttribute("title");
     }
     const reportList = document.querySelector("[data-report-list]");
     try {

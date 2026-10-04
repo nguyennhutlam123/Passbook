@@ -10,6 +10,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .models import (
     Book,
     BookRequest,
@@ -35,7 +36,10 @@ class BookRequestInputSerializer(serializers.Serializer):
     )
     category_id = serializers.PrimaryKeyRelatedField(
         source='category',
-        queryset=Category.objects.filter(status='ACTIVE'),
+        queryset=Category.objects.filter(
+            status='ACTIVE',
+            slug__in=BOOK_CATEGORY_SLUGS,
+        ),
         required=False,
         allow_null=True,
     )
@@ -233,6 +237,12 @@ class BookRequestListCreateView(APIView):
             status='OPEN',
         ).filter(
             Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+        ).filter(
+            Q(category__isnull=True)
+            | Q(
+                category__status='ACTIVE',
+                category__slug__in=BOOK_CATEGORY_SLUGS,
+            ),
         ).order_by('-created_at', '-id')
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
@@ -300,6 +310,18 @@ class BookRequestDetailView(APIView):
             not request.user.is_authenticated or item.user_id != request.user.id
         ):
             raise PermissionDenied('Yêu cầu này không khả dụng.')
+        if (
+            item.category_id
+            and (
+                item.category.status != 'ACTIVE'
+                or item.category.slug not in BOOK_CATEGORY_SLUGS
+            )
+            and (
+                not request.user.is_authenticated
+                or item.user_id != request.user.id
+            )
+        ):
+            raise PermissionDenied('Danh mục yêu cầu không còn được hỗ trợ.')
         return Response(request_payload(item))
 
     def patch(self, request, request_id):

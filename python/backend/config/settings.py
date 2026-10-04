@@ -12,10 +12,12 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from datetime import timedelta
 from pathlib import Path
+from dotenv import load_dotenv
 import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -165,7 +167,9 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-MYSQL_SSL_MODE = os.environ.get('MYSQL_SSL_MODE', 'DISABLED')
+MYSQL_SSL_MODE = os.environ.get('MYSQL_SSL_MODE', 'DISABLED').upper()
+if MYSQL_SSL_MODE not in {'REQUIRED', 'DISABLED'}:
+    raise ValueError('MYSQL_SSL_MODE must be REQUIRED or DISABLED.')
 
 DATABASES = {
     'default': {
@@ -175,15 +179,9 @@ DATABASES = {
         'PORT': os.environ.get('MYSQL_PORT', '3308'),
         'USER': os.environ.get('MYSQL_USER', 'root'),
         'PASSWORD': os.environ.get('MYSQL_PASSWORD', ''),
-        'OPTIONS': (
-            {
-                'ssl': {
-                    'ssl_mode': MYSQL_SSL_MODE,
-                },
-            }
-            if MYSQL_SSL_MODE != 'DISABLED'
-            else {}
-        ),
+        'OPTIONS': {
+            'ssl': {'verify_mode': 'none'},
+        } if MYSQL_SSL_MODE == 'REQUIRED' else {},
     }
 }
 

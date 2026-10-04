@@ -17,7 +17,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from config.cloudinary import verify_cloudinary_image
 from config.composite_admin import CompositeKeyAdmin
-from .category_taxonomy import BOOK_CATEGORIES
+from .category_taxonomy import BOOK_CATEGORIES, is_supported_book_category
 from .models import (
     Book,
     BookReservation,
@@ -64,7 +64,7 @@ from .commerce_api_views import (
     lend_listing_payload,
 )
 from .public_profile_api_views import PublicUserListingsView
-from .api_views import BookDetailView, BookImageListView
+from .api_views import BookDetailView, BookImageListView, prefetch_book_reviews
 from .request_api_views import BookIntentSummaryView, BookRequestDetailView
 from users.models import OtpVerification
 
@@ -83,7 +83,57 @@ class BookCategoryTaxonomyTests(SimpleTestCase):
                 'Truyện tranh',
             ],
         )
-        self.assertEqual(len({slug for slug, _name, _description in BOOK_CATEGORIES}), 7)
+        self.assertEqual(
+            [slug for slug, _name, _description in BOOK_CATEGORIES],
+            [
+                'tieu-thuyet',
+                'tho',
+                'kich',
+                'sach-giao-khoa',
+                'giao-trinh',
+                'tai-lieu',
+                'truyen-tranh',
+            ],
+        )
+        self.assertTrue(is_supported_book_category(None))
+        self.assertTrue(is_supported_book_category(SimpleNamespace(
+            slug='tieu-thuyet',
+            status='ACTIVE',
+        )))
+        self.assertFalse(is_supported_book_category(SimpleNamespace(
+            slug='legacy-category',
+            status='ACTIVE',
+        )))
+
+
+class BookReviewPrefetchTests(SimpleTestCase):
+    def test_reviews_are_batched_for_books_and_read_from_prefetch(self):
+        reviewer = SimpleNamespace(id=8, full_name='Reviewer')
+        review = SimpleNamespace(
+            id=12,
+            rating=5,
+            comment='Good book',
+            created_at=timezone.now(),
+            reviewer_id=8,
+            reviewer=reviewer,
+            sale_listing=SimpleNamespace(book_id=1),
+            lend_listing=None,
+        )
+        query = Mock()
+        query.select_related.return_value.only.return_value.order_by.return_value = [
+            review,
+        ]
+        books = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+
+        with patch('books.api_views.Review.objects.filter', return_value=query) as filter_reviews:
+            prefetch_book_reviews(books)
+
+        filter_reviews.assert_called_once()
+        self.assertEqual(
+            BookSerializer.get_reviews(books[0])[0]['reviewer'],
+            {'id': 8, 'name': 'Reviewer'},
+        )
+        self.assertEqual(BookSerializer.get_reviews(books[1]), [])
 
 
 class PublicUserListingsApiTests(SimpleTestCase):
@@ -704,6 +754,36 @@ class BuyBorrowSeparationTests(SimpleTestCase):
             CheckoutView._checkout_line(item, SimpleNamespace(id=8))
 
 
+class CheckoutQuoteTests(SimpleTestCase):
+    def test_quote_returns_item_subtotal(self):
+        item = SimpleNamespace(id=12)
+        line = {
+            'listing': SimpleNamespace(title='Acceptance book', currency='VND'),
+            'unit_price': Decimal('100.0000'),
+            'amount': Decimal('100.0000'),
+        }
+        request = SimpleNamespace(
+            query_params={'cart_item_id': '12'},
+            user=SimpleNamespace(id=8),
+        )
+
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=item,
+        ), patch.object(
+            CheckoutView,
+            '_checkout_line',
+            return_value=line,
+        ):
+            response = CheckoutView().get(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['items'][0]['subtotal'],
+            response.data['subtotal'],
+        )
+
+
 class ReservationApiValidationTests(SimpleTestCase):
     def test_duplicate_active_reservation_returns_a_validation_error(self):
         expires_at = (timezone.now() + timedelta(hours=1)).isoformat()
@@ -1099,9 +1179,15 @@ class BookOwnershipEndpointTests(SimpleTestCase):
 
 
 class PendingBookDetailAccessTests(SimpleTestCase):
+    @patch('books.api_views.prefetch_book_reviews')
     @patch('books.api_views.BookSerializer')
     @patch('books.api_views.optimized_books_queryset')
-    def test_owner_can_view_own_pending_book_detail(self, optimized_queryset, serializer_class):
+    def test_owner_can_view_own_pending_book_detail(
+        self,
+        optimized_queryset,
+        serializer_class,
+        prefetch_reviews,
+    ):
         user = SimpleNamespace(id=10, is_authenticated=True)
         book = SimpleNamespace(id=32)
         queryset = Mock()
@@ -1505,8 +1591,11 @@ class PaymentInputSecurityTests(SimpleTestCase):
             status='PENDING_PAYMENT',
             subtotal=Decimal('125.5000'),
             total_amount=Decimal('138.0500'),
+            pricing_snapshot={},
             currency='VND',
             checkout_group=SimpleNamespace(id=4),
+            updated_at=None,
+            save=Mock(),
         )
         payment = SimpleNamespace(
             id=71,
@@ -1567,7 +1656,10 @@ class PaymentInputSecurityTests(SimpleTestCase):
         values = payment_manager.get_or_create.call_args.kwargs['defaults']
         self.assertEqual(values['amount'], order.total_amount)
         self.assertEqual(values['status'], 'PENDING')
-        self.assertEqual(values['seller_amount'], order.subtotal)
+        self.assertEqual(
+            values['seller_amount'],
+            values['amount'] - values['platform_fee'],
+        )
         self.assertTrue(values['provider_transaction_code'].startswith('fake_'))
 
     def test_fake_payment_intent_is_idempotent_and_transitions_use_project_statuses(self):

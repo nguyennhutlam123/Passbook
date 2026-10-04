@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -42,6 +44,41 @@ def validate_shipment_transition(old_status, new_status):
         raise ValidationError(
             f'Không thể chuyển Shipment từ {old_status} sang {new_status}.',
         )
+
+
+def create_pending_shipment(
+    order,
+    *,
+    changed_by=None,
+    carrier=None,
+    tracking_code=None,
+    location=None,
+    description='Đã tạo thông tin vận chuyển; chờ PassBook tiếp nhận xử lý.',
+    created_at=None,
+):
+    now = created_at or timezone.now()
+    shipment = Shipment.objects.create(
+        order=order,
+        carrier=carrier,
+        tracking_code=tracking_code,
+        shipping_fee=Decimal('0'),
+        status='PENDING',
+        shipped_at=None,
+        currency=order.currency,
+        created_at=now,
+        updated_at=now,
+    )
+    ShipmentTracking.objects.create(
+        shipment=shipment,
+        status='PENDING',
+        source='SYSTEM',
+        changed_by_id=getattr(changed_by, 'id', None),
+        location=location,
+        description=description,
+        occurred_at=now,
+        created_at=now,
+    )
+    return shipment
 
 
 @transaction.atomic

@@ -40,6 +40,7 @@ from .models import (
     Shipment,
     ShipmentTracking,
 )
+from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .services import (
     FakePaymentProvider,
     PaymentProviderUnavailable,
@@ -53,6 +54,7 @@ from .services import (
 )
 from .shipment_services import (
     SHIPMENT_STATUSES,
+    create_pending_shipment,
     is_return_shipment as shipment_is_return,
     update_shipment_status,
     validate_shipment_transition,
@@ -318,7 +320,7 @@ class CheckoutView(APIView):
                 'title': line['listing'].title,
                 'unit_price': str(line['unit_price']),
                 'quantity': 1,
-                'subtotal': str(subtotal),
+                'subtotal': str(split['subtotal']),
                 'currency': line['listing'].currency,
             }],
             'subtotal': str(split['subtotal']),
@@ -593,6 +595,8 @@ class CheckoutView(APIView):
                     created_at=now,
                     updated_at=now,
                 )
+                if order_status == 'CONFIRMED':
+                    create_pending_shipment(order, created_at=now)
                 notify_order_parties(
                     order,
                     title=f'Đặt hàng thành công · {order.order_code}',
@@ -706,6 +710,12 @@ class LendListingListCreateView(APIView):
             book__status='AVAILABLE',
         ).filter(
             Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+        ).filter(
+            Q(book__book_edition__book_work__category__isnull=True)
+            | Q(
+                book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+            ),
         ).select_related(
             'book__book_edition__book_work',
             'book__book_edition__book_work__category',
@@ -845,12 +855,14 @@ class LendListingListCreateView(APIView):
             queryset = queryset.filter(
                 book__book_edition__book_work__category_id=category_id,
                 book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
             )
         category_slug = (params.get('category_slug') or '').strip()
         if category_slug:
             queryset = queryset.filter(
                 book__book_edition__book_work__category__slug=category_slug,
                 book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
             )
         publication_year = _query_integer(params, 'publication_year')
         if publication_year is not None:
@@ -1016,6 +1028,12 @@ class LendListingDetailView(APIView):
                 book__status='AVAILABLE',
             ).filter(
                 Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+            ).filter(
+                Q(book__book_edition__book_work__category__isnull=True)
+                | Q(
+                    book__book_edition__book_work__category__status='ACTIVE',
+                    book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+                ),
             ).select_related(
                 'book__book_edition__book_work__category',
                 'book__book_edition__language',
@@ -2621,25 +2639,12 @@ class ShipmentListCreateView(APIView):
         serializer = ShipmentInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         now = timezone.now()
-        shipment = Shipment.objects.create(
-            order=order,
+        shipment = create_pending_shipment(
+            order,
+            changed_by=request.user,
             carrier=serializer.validated_data.get('carrier'),
             tracking_code=serializer.validated_data.get('tracking_code'),
-            shipping_fee=Decimal('0'),
-            status='PENDING',
-            shipped_at=None,
-            currency='VND',
-            created_at=now,
-            updated_at=now,
-        )
-        ShipmentTracking.objects.create(
-            shipment=shipment,
-            status='PENDING',
-            source='SYSTEM',
-            changed_by_id=request.user.id,
             location=serializer.validated_data.get('location'),
-            description='Đã tạo thông tin vận chuyển; chờ PassBook tiếp nhận xử lý.',
-            occurred_at=now,
             created_at=now,
         )
         return Response(

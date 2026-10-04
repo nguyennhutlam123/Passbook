@@ -213,7 +213,13 @@ class AdminBorrowOrderListView(APIView):
             Prefetch(
                 'order__shipments',
                 queryset=Shipment.objects.prefetch_related(
-                    'tracking_events',
+                    Prefetch(
+                        'tracking_events',
+                        queryset=ShipmentTracking.objects.order_by(
+                            'occurred_at',
+                            'id',
+                        ),
+                    ),
                 ).order_by('id'),
                 to_attr='borrow_shipments',
             ),
@@ -304,7 +310,13 @@ class AdminOrderListView(APIView):
             Prefetch(
                 'shipments',
                 queryset=Shipment.objects.prefetch_related(
-                    'tracking_events',
+                    Prefetch(
+                        'tracking_events',
+                        queryset=ShipmentTracking.objects.order_by(
+                            'occurred_at',
+                            'id',
+                        ),
+                    ),
                 ).order_by('created_at', 'id'),
             ),
         ).order_by('-created_at', '-id')
@@ -412,10 +424,7 @@ class AdminOrderListView(APIView):
                             'note': event.description,
                             'occurred_at': event.occurred_at,
                         }
-                        for event in shipment.tracking_events.all().order_by(
-                            'occurred_at',
-                            'id',
-                        )
+                        for event in shipment.tracking_events.all()
                     ],
                 }
                 for shipment in order.shipments.all()
@@ -634,7 +643,13 @@ class AdminShipmentListView(APIView):
             'order__borrow_order__lender',
             'order__borrow_order__borrower',
         ).prefetch_related(
-            'tracking_events',
+            Prefetch(
+                'tracking_events',
+                queryset=ShipmentTracking.objects.order_by(
+                    'occurred_at',
+                    'id',
+                ),
+            ),
         ).annotate(
             _is_return_shipment=Exists(
                 BorrowOrder.objects.filter(
@@ -705,10 +720,7 @@ class AdminShipmentListView(APIView):
             borrow_reference = None
 
         history = []
-        for event in shipment.tracking_events.all().order_by(
-            'occurred_at',
-            'id',
-        ):
+        for event in shipment.tracking_events.all():
             history.append({
                 'id': event.id,
                 'status': event.status,

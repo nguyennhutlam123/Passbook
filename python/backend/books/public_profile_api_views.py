@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from users.models import User
+from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .models import (
     BookImage,
     BookWorkSubject,
@@ -25,6 +26,12 @@ def _listing_queryset(listing_type, user_id, now):
             book__status='AVAILABLE',
         ).filter(
             Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+        ).filter(
+            Q(book__book_edition__book_work__category__isnull=True)
+            | Q(
+                book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+            ),
         ).select_related(
             'seller__university',
             'book__book_edition__book_work__category',
@@ -50,6 +57,12 @@ def _listing_queryset(listing_type, user_id, now):
         book__status='AVAILABLE',
     ).filter(
         Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+    ).filter(
+        Q(book__book_edition__book_work__category__isnull=True)
+        | Q(
+            book__book_edition__book_work__category__status='ACTIVE',
+            book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+        ),
     ).select_related(
         'lender__university',
         'book__book_edition__book_work__category',

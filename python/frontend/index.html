@@ -32,29 +32,20 @@
             </div>
         </section>
 
-        <section class="page-shell catalog-navigation" aria-labelledby="catalog-navigation-title">
+        <section class="page-shell catalog-navigation" id="catalog-navigation" aria-labelledby="catalog-navigation-title">
             <div class="section-heading section-heading--catalog">
-                <div><span class="eyebrow">Danh mục</span><h2 id="catalog-navigation-title">Duyệt theo danh mục</h2></div>
+                <div><span class="eyebrow">Tìm nhanh</span><h2 id="catalog-navigation-title">Khám phá theo danh mục</h2></div>
                 <a class="text-link" href="books.html">Tất cả sách <span>→</span></a>
             </div>
-            <nav class="catalog-tabs" aria-label="Danh mục sách">
-                <a class="catalog-tab is-active" href="books.html">Tất cả</a>
-                <a class="catalog-tab" href="books.html?category_slug=tieu-thuyet">Tiểu thuyết</a>
-                <a class="catalog-tab" href="books.html?category_slug=tho">Thơ</a>
-                <a class="catalog-tab" href="books.html?category_slug=kich">Kịch</a>
-                <a class="catalog-tab" href="books.html?category_slug=sach-giao-khoa">Sách giáo khoa</a>
-                <a class="catalog-tab" href="books.html?category_slug=giao-trinh">Giáo trình</a>
-                <a class="catalog-tab" href="books.html?category_slug=tai-lieu">Tài liệu</a>
-                <a class="catalog-tab" href="books.html?category_slug=truyen-tranh">Truyện tranh</a>
+            <nav class="category-grid" aria-label="Danh mục sách">
+                <a class="category-card" href="books.html?category_slug=tieu-thuyet"><span aria-hidden="true">01</span><strong>Tiểu thuyết</strong></a>
+                <a class="category-card" href="books.html?category_slug=tho"><span aria-hidden="true">02</span><strong>Thơ</strong></a>
+                <a class="category-card" href="books.html?category_slug=kich"><span aria-hidden="true">03</span><strong>Kịch</strong></a>
+                <a class="category-card" href="books.html?category_slug=sach-giao-khoa"><span aria-hidden="true">04</span><strong>Sách giáo khoa</strong></a>
+                <a class="category-card" href="books.html?category_slug=giao-trinh"><span aria-hidden="true">05</span><strong>Giáo trình</strong></a>
+                <a class="category-card" href="books.html?category_slug=tai-lieu"><span aria-hidden="true">06</span><strong>Tài liệu</strong></a>
+                <a class="category-card" href="books.html?category_slug=truyen-tranh"><span aria-hidden="true">07</span><strong>Truyện tranh</strong></a>
             </nav>
-        </section>
-
-        <section class="page-shell collection-section collection-section--borrow" aria-labelledby="home-borrow-title">
-            <div class="collection-heading">
-                <div><span class="eyebrow">Mượn linh hoạt</span><h2 id="home-borrow-title">Mượn sách</h2><p>Sách cho mượn đang khả dụng từ cộng đồng sinh viên.</p></div>
-                <a class="text-link" href="borrow.html">Khám phá sách mượn <span>→</span></a>
-            </div>
-            <div class="book-grid book-grid--storefront" data-home-borrow aria-live="polite"></div>
         </section>
 
         <div class="storefront-content" data-home-content>
@@ -63,11 +54,23 @@
                     <div><span class="eyebrow">Vừa lên kệ</span><h2 id="new-books-title">Mua sách mới đăng</h2><p>Những giáo trình vừa được sinh viên đăng bán.</p></div>
                     <a class="text-link" href="books.html?sort=newest">Xem tất cả <span>→</span></a>
                 </div>
-                <div class="book-grid book-grid--storefront" data-new-books></div>
+                <div class="book-grid book-grid--storefront" data-new-books aria-live="polite">
+                    <p class="loading-state book-grid__state" role="status">Đang tải sách mới đăng...</p>
+                </div>
             </section>
 
-            <div class="subject-collections" data-subject-collections></div>
+            <div class="category-collections" data-category-collections></div>
         </div>
+
+        <section class="page-shell collection-section collection-section--borrow" aria-labelledby="home-borrow-title">
+            <div class="collection-heading">
+                <div><span class="eyebrow">Mượn linh hoạt</span><h2 id="home-borrow-title">Sách cho mượn</h2><p>Khám phá sách được chia sẻ từ cộng đồng sinh viên.</p></div>
+                <a class="text-link" href="borrow.html">Khám phá sách mượn <span>→</span></a>
+            </div>
+            <div class="book-grid book-grid--storefront" data-home-borrow aria-live="polite">
+                <p class="loading-state book-grid__state" role="status">Đang tải sách cho mượn...</p>
+            </div>
+        </section>
 
         <section class="page-shell how-section" id="guide" aria-labelledby="guide-title">
             <div class="section-heading section-heading--center"><div><span class="eyebrow">Mua bán thật đơn giản</span><h2 id="guide-title">PassBook hoạt động thế nào?</h2></div></div>
@@ -75,6 +78,15 @@
                 <article><span>01</span><strong>Tìm sách</strong><p>Tìm theo tên, môn học hoặc danh mục bạn cần.</p></article>
                 <article><span>02</span><strong>Liên hệ người bán</strong><p>Trao đổi trực tiếp về tình trạng và giá sách.</p></article>
                 <article><span>03</span><strong>Nhận sách</strong><p>Hẹn gặp tại trường và bắt đầu học ngay.</p></article>
+            </div>
+        </section>
+
+        <section class="page-shell trust-section" aria-labelledby="trust-title">
+            <div class="section-heading"><div><span class="eyebrow">Mua bán an tâm</span><h2 id="trust-title">Rõ ràng trong từng giao dịch</h2></div></div>
+            <div class="trust-grid">
+                <article><span aria-hidden="true">01</span><h3>Thông tin người bán</h3><p>Xem hồ sơ và thông tin trường được cung cấp trên PassBook.</p></article>
+                <article><span aria-hidden="true">02</span><h3>Trao đổi trực tiếp</h3><p>Liên hệ người bán qua khu vực tin nhắn của nền tảng.</p></article>
+                <article><span aria-hidden="true">03</span><h3>Theo dõi đơn hàng</h3><p>Xem trạng thái đơn và vận chuyển trong trang Đơn hàng.</p></article>
             </div>
         </section>
 
@@ -91,23 +103,12 @@
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js"></script>
     <script src="js/components/books/book-card.js"></script>
-    <script src="js/components/commerce/cards.js"></script>
-    <script src="js/components/messaging/cards.js"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
-    <script src="js/api/users-api.js"></script>
     <script src="js/api/books-api.js"></script>
     <script src="js/api/favorites-api.js"></script>
-    <script src="js/api/reservations-api.js"></script>
-    <script src="js/api/orders-api.js"></script>
-    <script src="js/api/payments-api.js"></script>
-    <script src="js/api/shipping-api.js"></script>
-    <script src="js/api/returns-api.js"></script>
-    <script src="js/api/messaging-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
-    <script src="js/api/reports-api.js"></script>
-    <script src="js/api/admin-api.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

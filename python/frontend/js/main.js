@@ -30,6 +30,7 @@ function attachImageFallbacks(root = document) {
 
 let favoriteBookIds = new Set();
 let favoriteBookIdsPromise = null;
+let navOutsideClickRegistered = false;
 
 async function loadFavoriteBookIds() {
     if (!isLoggedIn()) {
@@ -198,90 +199,6 @@ async function openConversationModal(conversationId) {
     }
 }
 
-function setupNotifications() {
-    const button = document.querySelector("[data-notifications]");
-    if (!button || !isLoggedIn()) return;
-    let loaded = false;
-    const menu = document.createElement("div");
-    menu.className = "notification-menu";
-    menu.hidden = true;
-    button.parentElement.appendChild(menu);
-    const render = (data) => {
-        const results = data.results || [];
-        menu.replaceChildren();
-        if (!results.length) {
-            menu.append(PassbookCommonComponents.emptyState("Không có thông báo."));
-        }
-        results.forEach((notification) => {
-            const item = PassbookCommonComponents.notificationItem(notification);
-            item.addEventListener("click", async () => {
-                try {
-                    await NotificationsAPI.markRead(notification.id);
-                    notification.is_read = true;
-                    item.classList.remove("is-unread");
-                    const count = button.querySelector("[data-notification-count]");
-                    if (count) {
-                        const unread = results.filter((entry) => !entry.is_read).length;
-                        count.textContent = String(unread);
-                        count.hidden = unread === 0;
-                    }
-                    if (notification.reference_id) {
-                        window.location.href = notification.entity_type === "ORDER"
-                            ? `orders.html?order_id=${encodeURIComponent(notification.reference_id)}`
-                            : `book-detail.html?id=${encodeURIComponent(notification.reference_id)}`;
-                    } else {
-                        window.location.href = "notifications.html";
-                    }
-                } catch (error) {
-                    showToast(error.message);
-                }
-            });
-            menu.append(item);
-        });
-        const viewAll = document.createElement("a");
-        viewAll.className = "notification-view-all";
-        viewAll.href = "notifications.html";
-        viewAll.textContent = "Xem tất cả thông báo";
-        menu.append(viewAll);
-        const unread = results.filter((item) => !item.is_read).length;
-        const count = button.querySelector("[data-notification-count]");
-        if (count) {
-            count.textContent = String(unread);
-            count.hidden = unread === 0;
-        }
-        if (unread) {
-            const markAll = document.createElement("button");
-            markAll.className = "notification-mark-all";
-            markAll.type = "button";
-            markAll.textContent = "Đánh dấu tất cả đã đọc";
-            markAll.addEventListener("click", async () => {
-                markAll.disabled = true;
-                try {
-                    await NotificationsAPI.markAllRead();
-                    results.forEach((item) => { item.is_read = true; });
-                    render({results});
-                } catch (error) {
-                    showToast(error.message);
-                } finally {
-                    markAll.disabled = false;
-                }
-            });
-            menu.append(markAll);
-        }
-    };
-    button.addEventListener("click", async () => {
-        menu.hidden = !menu.hidden;
-        if (!loaded) {
-            try {
-                render(await NotificationsAPI.list({page_size: 10}));
-                loaded = true;
-            } catch (error) {
-                menu.replaceChildren(PassbookCommonComponents.emptyState(error.message));
-            }
-        }
-    });
-}
-
 function fallbackBookImage(book) {
     const subject = book.subject?.name || book.subject || "PASSBOOK";
     const encoded = encodeURIComponent(subject.slice(0, 24));
@@ -322,7 +239,7 @@ function bindFavoriteButtons(root = document) {
 
 function renderHomepage() {
     const newGrid = document.querySelector("[data-new-books]");
-    const collections = document.querySelector("[data-subject-collections]");
+    const collections = document.querySelector("[data-category-collections]");
     const borrowGrid = document.querySelector("[data-home-borrow]");
     if (!newGrid || !collections || !borrowGrid) return;
     BooksAPI.lendListings({page_size: 4}).then((data) => {
@@ -356,11 +273,17 @@ function renderHomepage() {
                 )]
         ));
         attachImageFallbacks(borrowGrid);
-    }).catch((error) => {
-        borrowGrid.replaceChildren(PassbookCommonComponents.emptyStateElement(
+    }).catch(() => {
+        const failure = PassbookCommonComponents.emptyStateElement(
             "Không thể tải sách cho mượn.",
-            error.message,
-        ));
+            "Vui lòng thử lại sau hoặc xem các tin đăng mượn sách.",
+        );
+        const browse = document.createElement("a");
+        browse.className = "button button-outline";
+        browse.href = "borrow.html";
+        browse.textContent = "Xem sách cho mượn";
+        failure.append(browse);
+        borrowGrid.replaceChildren(failure);
     });
     const categorySections = [
         {name: "Tiểu thuyết", slug: "tieu-thuyet", description: "Những câu chuyện và thế giới giàu cảm xúc.", tone: "blue"},
@@ -374,7 +297,7 @@ function renderHomepage() {
     const renderCollection = (section, books) => {
         if (!books.length) return "";
         const query = encodeURIComponent(section.slug);
-        return `<section class="page-shell collection-section collection-section--${section.tone}" aria-labelledby="collection-${section.slug}">
+        return `<section class="page-shell collection-section category-collection collection-section--${section.tone}" aria-labelledby="collection-${section.slug}">
             <div class="collection-heading"><div><span class="eyebrow">${section.name}</span><h2 id="collection-${section.slug}">${section.name}</h2><p>${section.description}</p></div><a class="text-link" href="books.html?category_slug=${query}">Xem tất cả <span>→</span></a></div>
             <div class="book-grid book-grid--storefront">${books.slice(0, 4).map(renderBookCard).join("")}</div>
         </section>`;
@@ -388,15 +311,38 @@ function renderHomepage() {
             }
         }
         const books = data.results || [];
-        newGrid.innerHTML = books.slice(0, 4).map(renderBookCard).join("");
+        if (books.length) {
+            newGrid.innerHTML = books.slice(0, 4).map(renderBookCard).join("");
+        } else {
+            const empty = PassbookCommonComponents.emptyStateElement(
+                "Chưa có sách mới đăng.",
+                "Khám phá danh mục để tìm cuốn sách phù hợp.",
+            );
+            const browse = document.createElement("a");
+            browse.className = "button button-outline";
+            browse.href = "books.html";
+            browse.textContent = "Khám phá sách";
+            empty.append(browse);
+            newGrid.replaceChildren(empty);
+        }
         collections.innerHTML = categorySections.map((section) => renderCollection(
             section,
             books.filter((book) => book.category?.name === section.name),
         )).join("");
         bindFavoriteButtons(document);
         attachImageFallbacks(document);
-    }).catch((error) => {
-        newGrid.innerHTML = `<div class="empty-state"><strong>Không thể tải sách</strong><span>${escapeHtml(error.message)}</span></div>`;
+    }).catch(() => {
+        const failure = PassbookCommonComponents.emptyStateElement(
+            "Không thể tải sách mới.",
+            "Kiểm tra kết nối rồi thử tải lại.",
+        );
+        const retry = document.createElement("button");
+        retry.className = "button button-outline";
+        retry.type = "button";
+        retry.textContent = "Thử lại";
+        retry.addEventListener("click", () => window.location.reload());
+        failure.append(retry);
+        newGrid.replaceChildren(failure);
     });
 
     document.querySelector("[data-home-search]")?.addEventListener("submit", (event) => {
@@ -428,14 +374,39 @@ function renderSiteChrome() {
     toggle?.addEventListener("click", () => {
         const isOpen = menu.classList.toggle("is-open");
         toggle.setAttribute("aria-expanded", String(isOpen));
+        const label = toggle.querySelector("[data-nav-toggle-label]");
+        if (label) label.textContent = isOpen ? "Đóng menu" : "Mở menu";
     });
     document.querySelector(".nav-more")?.addEventListener("click", (event) => {
         if (event.target.closest("a, button")) event.currentTarget.open = false;
     });
-    document.addEventListener("click", (event) => {
-        const details = document.querySelector(".nav-more");
-        if (details?.open && !details.contains(event.target)) details.open = false;
-    });
+    if (!navOutsideClickRegistered) {
+        document.addEventListener("click", (event) => {
+            const details = document.querySelector(".nav-more");
+            if (details?.open && !details.contains(event.target)) details.open = false;
+            const navMenu = document.querySelector(".nav-menu");
+            const navToggle = document.querySelector(".nav-toggle");
+            if (navMenu?.classList.contains("is-open")
+                && !navMenu.contains(event.target)
+                && !navToggle?.contains(event.target)) {
+                navMenu.classList.remove("is-open");
+                navToggle.setAttribute("aria-expanded", "false");
+                const label = navToggle.querySelector("[data-nav-toggle-label]");
+                if (label) label.textContent = "Mở menu";
+            }
+        });
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") return;
+            document.querySelector(".nav-more")?.removeAttribute("open");
+            const navMenu = document.querySelector(".nav-menu");
+            const navToggle = document.querySelector(".nav-toggle");
+            navMenu?.classList.remove("is-open");
+            navToggle?.setAttribute("aria-expanded", "false");
+            const label = navToggle?.querySelector("[data-nav-toggle-label]");
+            if (label) label.textContent = "Mở menu";
+        });
+        navOutsideClickRegistered = true;
+    }
 
     document.querySelector("[data-logout]")?.addEventListener("click", async () => {
         try {
@@ -454,16 +425,20 @@ function renderSiteChrome() {
             ? `${basePath}books.html?q=${encodeURIComponent(query)}`
             : `${basePath}books.html`;
     });
-    setupNotifications();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     document.documentElement.classList.add("js-ready");
+    const headerIdentity = (user) => JSON.stringify([
+        user?.name || "",
+        String(user?.role || "").toUpperCase(),
+    ]);
+    const initialHeaderIdentity = headerIdentity(PassbookAuth.getCurrentUser());
     renderSiteChrome();
     if (getAccessToken()) {
         AuthAPI.currentUser()
-            .then(() => {
-                renderSiteChrome();
+            .then((user) => {
+                if (headerIdentity(user) !== initialHeaderIdentity) renderSiteChrome();
             })
             .catch((error) => {
                 if ([401, 403].includes(error.status)) {

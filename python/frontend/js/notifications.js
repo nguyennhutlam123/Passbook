@@ -33,9 +33,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 return item;
             });
-            list.replaceChildren(...(nodes.length
-                ? nodes
-                : [PassbookCommonComponents.emptyState("Không có thông báo.")]));
+            if (nodes.length) {
+                list.replaceChildren(...nodes);
+            } else {
+                list.replaceChildren();
+            }
             const controls = PassbookCommonComponents.pagination({
                 previous: currentData.previous,
                 next: currentData.next,
@@ -45,7 +47,17 @@ document.addEventListener("DOMContentLoaded", () => {
             pagination.replaceChildren(controls);
             markAll.hidden = !notifications.some((item) => !item.is_read);
         } catch (requestError) {
-            list.replaceChildren(PassbookCommonComponents.emptyState("Không thể tải thông báo."));
+            const failure = PassbookCommonComponents.emptyStateElement(
+                "Không thể tải thông báo.",
+                "Kiểm tra kết nối rồi thử lại.",
+            );
+            const retry = document.createElement("button");
+            retry.className = "button button-outline";
+            retry.type = "button";
+            retry.textContent = "Thử lại";
+            retry.addEventListener("click", () => void load());
+            failure.append(retry);
+            list.replaceChildren(failure);
             error.textContent = requestError.message;
         }
     };

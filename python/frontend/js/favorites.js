@@ -34,12 +34,20 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const data = await FavoritesAPI.list({page: pageNumber, page_size: 20});
             const favorites = data.results || [];
-            list.replaceChildren(...(favorites.length
-                ? favorites.map(renderBook)
-                : [PassbookCommonComponents.emptyStateElement(
+            if (favorites.length) {
+                list.replaceChildren(...favorites.map(renderBook));
+            } else {
+                const empty = PassbookCommonComponents.emptyStateElement(
                     "Bạn chưa lưu sách yêu thích nào.",
-                    "Nhấn biểu tượng trái tim trên sách để lưu vào danh sách này.",
-                )]));
+                    "Khám phá sách và lưu những cuốn bạn quan tâm.",
+                );
+                const explore = document.createElement("a");
+                explore.className = "button button-primary";
+                explore.href = "books.html";
+                explore.textContent = "Khám phá sách";
+                empty.append(explore);
+                list.replaceChildren(empty);
+            }
             const controls = PassbookCommonComponents.pagination({
                 previous: data.previous,
                 next: data.next,
@@ -56,10 +64,17 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             pagination.replaceChildren(controls);
         } catch (requestError) {
-            list.replaceChildren(PassbookCommonComponents.emptyStateElement(
+            const failure = PassbookCommonComponents.emptyStateElement(
                 "Không thể tải sách yêu thích.",
-                requestError.message,
-            ));
+                "Kiểm tra kết nối rồi thử lại.",
+            );
+            const retry = document.createElement("button");
+            retry.className = "button button-outline";
+            retry.type = "button";
+            retry.textContent = "Thử lại";
+            retry.addEventListener("click", () => void load());
+            failure.append(retry);
+            list.replaceChildren(failure);
         }
     };
     void load();

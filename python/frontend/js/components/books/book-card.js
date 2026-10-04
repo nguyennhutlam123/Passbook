@@ -15,6 +15,11 @@
         const subject = escape(book.subject?.name || book.subject || "Giáo trình");
         const code = escape(book.subject?.code || book.subjectCode || "");
         const seller = escape(book.seller?.name || "Người bán");
+        const category = book.category?.name || book.category_name || "";
+        const sellerLocation = book.seller?.university?.name
+            || book.university?.name
+            || (typeof book.location === "string" ? book.location : "")
+            || (typeof book.city === "string" ? book.city : "");
         const conditionValue = book.condition_status || book.condition || "";
         const condition = escape({
             new: "Mới",
@@ -22,10 +27,6 @@
             good: "Tốt",
             used: "Đã sử dụng",
         }[conditionValue] || book.condition_label || conditionValue || "Đang cập nhật");
-        const editionInfo = [book.edition, book.publication_year]
-            .filter(Boolean)
-            .map(escape)
-            .join(" · ");
         const statusLabels = {
             sold: "Đã bán",
             reserved: "Có yêu cầu đang xử lý",
@@ -56,9 +57,6 @@
         const borrowTerms = book.listing_type === "BORROW"
             ? `<p class="book-card__subject">${book.borrow_terms?.max_days ? `Tối đa ${escape(book.borrow_terms.max_days)} ngày` : "Thời hạn theo thỏa thuận"}${Number(book.deposit_amount) > 0 ? ` · Cọc ${global.formatPrice(Number(book.deposit_amount))}` : ""}</p>`
             : "";
-        const intentCounts = book.listing_type === "BORROW"
-            ? ""
-            : `<p class="book-card__intent-counts"><span>👥 ${Number(book.buying_intent_count) || 0} dự định mua</span><span>🏷️ ${Number(book.selling_intent_count) || 0} dự định bán</span></p>`;
         return `<article class="book-card">
             <a class="book-card__cover-link" href="${detailUrl}" aria-label="Xem ${title}">
                 <div class="book-card__cover">
@@ -68,14 +66,14 @@
             </a>
             <div class="book-card__body">
                 ${listingBadge}
-                ${badge}
                 <h3 class="book-card__title"><a href="${detailUrl}">${title}</a></h3>
+                ${category ? `<p class="book-card__category">${escape(category)}</p>` : ""}
                 <p class="book-card__subject">${subject}${code ? ` · ${code}` : ""}</p>
-                ${editionInfo ? `<p class="book-card__subject">${editionInfo}</p>` : ""}
+                ${badge}
                 <strong class="price">${book.listing_type === "BORROW" ? "Phí mượn · " : ""}${global.formatPrice(Number(book.price) || 0)}</strong>
                 ${borrowTerms}
-                ${intentCounts}
                 <div class="seller-line"><span>${seller}</span></div>
+                ${sellerLocation ? `<p class="book-card__location">${escape(sellerLocation)}</p>` : ""}
                 ${borrowAction}
             </div>
         </article>`;

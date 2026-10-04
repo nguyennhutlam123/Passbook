@@ -10,6 +10,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .category_taxonomy import BOOK_CATEGORY_SLUGS, is_supported_book_category
 from .models import (
     Book,
     BookIdentifier,
@@ -124,6 +125,12 @@ class SaleListingListCreateView(APIView):
             book__status='AVAILABLE',
         ).filter(
             Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+        ).filter(
+            Q(book__book_edition__book_work__category__isnull=True)
+            | Q(
+                book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+            ),
         )
         params = request.query_params
         search = (params.get('search') or '').strip()
@@ -168,12 +175,14 @@ class SaleListingListCreateView(APIView):
             queryset = queryset.filter(
                 book__book_edition__book_work__category_id=category_id,
                 book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
             )
         category_slug = (params.get('category_slug') or '').strip()
         if category_slug:
             queryset = queryset.filter(
                 book__book_edition__book_work__category__slug=category_slug,
                 book__book_edition__book_work__category__status='ACTIVE',
+                book__book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
             )
         publication_year = self._integer_param(params, 'publication_year')
         if publication_year is not None:
@@ -315,6 +324,13 @@ class SaleListingDetailView(APIView):
             or listing.seller_id != request.user.id
         ):
             raise PermissionDenied('Tin đăng không khả dụng.')
+        if not is_supported_book_category(
+            listing.book.book_edition.book_work.category,
+        ) and (
+            not request.user.is_authenticated
+            or listing.seller_id != request.user.id
+        ):
+            raise PermissionDenied('Danh mục tin đăng không còn được hỗ trợ.')
         return Response(sale_listing_payload(listing))
 
     @transaction.atomic

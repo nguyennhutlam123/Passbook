@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -14,12 +15,64 @@ from .admin_dashboard_views import (
 from .commerce_api_views import ShipmentTrackingCreateView
 from .shipment_services import (
     SHIPMENT_TRANSITIONS,
+    create_pending_shipment,
     update_shipment_status,
     validate_shipment_transition,
 )
 
 
 class ShipmentStateMachineTests(SimpleTestCase):
+    def test_create_pending_shipment_records_initial_system_event(self):
+        now = Mock(name='now')
+        order = SimpleNamespace(id=9, currency='VND')
+        shipment = SimpleNamespace(id=5)
+        shipment_manager = Mock()
+        shipment_manager.create.return_value = shipment
+        tracking_manager = Mock()
+        actor = SimpleNamespace(id=76)
+
+        with patch(
+            'books.shipment_services.Shipment.objects',
+            shipment_manager,
+        ), patch(
+            'books.shipment_services.ShipmentTracking.objects',
+            tracking_manager,
+        ):
+            result = create_pending_shipment(
+                order,
+                changed_by=actor,
+                carrier='Acceptance carrier',
+                tracking_code='ACCEPT-5',
+                location='Local test',
+                created_at=now,
+            )
+
+        self.assertIs(result, shipment)
+        self.assertEqual(
+            shipment_manager.create.call_args.kwargs,
+            {
+                'order': order,
+                'carrier': 'Acceptance carrier',
+                'tracking_code': 'ACCEPT-5',
+                'shipping_fee': Decimal('0'),
+                'status': 'PENDING',
+                'shipped_at': None,
+                'currency': 'VND',
+                'created_at': now,
+                'updated_at': now,
+            },
+        )
+        tracking_manager.create.assert_called_once_with(
+            shipment=shipment,
+            status='PENDING',
+            source='SYSTEM',
+            changed_by_id=76,
+            location='Local test',
+            description='Đã tạo thông tin vận chuyển; chờ PassBook tiếp nhận xử lý.',
+            occurred_at=now,
+            created_at=now,
+        )
+
     def test_standard_shipment_transitions_follow_forward_order(self):
         for old_status, new_status in (
             ('PENDING', 'PICKED_UP'),

@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from config.cloudinary import verify_cloudinary_image
+from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .models import (
     Book,
     BookIdentifier,
@@ -22,6 +23,7 @@ from .models import (
     BookWorkSubject,
     Favorite,
     LendListing,
+    Review,
     SaleListing,
 )
 from .pagination import BookPagination
@@ -194,6 +196,49 @@ def optimized_books_queryset(
     return queryset.select_related(*selected_relations).prefetch_related(*prefetches)
 
 
+def prefetch_book_reviews(books):
+    books = list(books)
+    if not books:
+        return books
+
+    book_ids = [book.id for book in books]
+    reviews = Review.objects.filter(
+        Q(sale_listing__book_id__in=book_ids)
+        | Q(lend_listing__book_id__in=book_ids),
+    ).select_related(
+        'reviewer',
+        'sale_listing',
+        'lend_listing',
+    ).only(
+        'id',
+        'rating',
+        'comment',
+        'created_at',
+        'reviewer_id',
+        'reviewer__full_name',
+        'sale_listing_id',
+        'sale_listing__book_id',
+        'lend_listing_id',
+        'lend_listing__book_id',
+    ).order_by(
+        '-created_at',
+        '-id',
+    )
+    reviews_by_book = {book_id: [] for book_id in book_ids}
+    for review in reviews:
+        related_book_ids = {
+            listing.book_id
+            for listing in (review.sale_listing, review.lend_listing)
+            if listing is not None and listing.book_id in reviews_by_book
+        }
+        for book_id in related_book_ids:
+            reviews_by_book[book_id].append(review)
+
+    for book in books:
+        book._prefetched_book_reviews = reviews_by_book[book.id]
+    return books
+
+
 def _with_search(queryset, search):
     search = (search or '').strip()
     if not search:
@@ -247,6 +292,12 @@ class BookListView(APIView):
             active_only=True,
         ).filter(
             status='AVAILABLE',
+        ).filter(
+            Q(book_edition__book_work__category__isnull=True)
+            | Q(
+                book_edition__book_work__category__status='ACTIVE',
+                book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+            ),
         )
         now = timezone.now()
         active_listings = SaleListing.objects.filter(
@@ -270,12 +321,14 @@ class BookListView(APIView):
             queryset = queryset.filter(
                 book_edition__book_work__category_id=category_id,
                 book_edition__book_work__category__status='ACTIVE',
+                book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
             )
         category_slug = (query_params.get('category_slug') or '').strip()
         if category_slug:
             queryset = queryset.filter(
                 book_edition__book_work__category__slug=category_slug,
                 book_edition__book_work__category__status='ACTIVE',
+                book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
             )
         edition = query_params.get('edition')
         if edition:
@@ -453,6 +506,7 @@ class BookListView(APIView):
                     status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
                 ).order_by('-id')[:1],
             )
+        prefetch_book_reviews([book])
         return Response(BookSerializer(book).data, status=status.HTTP_201_CREATED)
 
 
@@ -502,6 +556,7 @@ class MyBooksView(APIView):
 
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
+        prefetch_book_reviews(page)
         return paginator.get_paginated_response(BookSerializer(page, many=True).data)
 
 
@@ -517,6 +572,7 @@ class BookDetailView(APIView):
                 pk=pk,
             ).first()
             if own_pending_book is not None:
+                prefetch_book_reviews([own_pending_book])
                 return Response(BookSerializer(own_pending_book).data)
 
         book = get_object_or_404(
@@ -524,11 +580,18 @@ class BookDetailView(APIView):
                 status='AVAILABLE',
                 sale_listings__status='ACTIVE',
             ).filter(
+                Q(book_edition__book_work__category__isnull=True)
+                | Q(
+                    book_edition__book_work__category__status='ACTIVE',
+                    book_edition__book_work__category__slug__in=BOOK_CATEGORY_SLUGS,
+                ),
+            ).filter(
                 Q(sale_listings__expires_at__isnull=True)
                 | Q(sale_listings__expires_at__gt=timezone.now()),
             ),
             pk=pk,
         )
+        prefetch_book_reviews([book])
         return Response(BookSerializer(book).data)
 
     def patch(self, request, pk):
@@ -543,6 +606,7 @@ class BookDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         book = serializer.save()
         book = optimized_books_queryset().get(pk=book.pk)
+        prefetch_book_reviews([book])
         return Response(BookSerializer(book).data)
 
     def delete(self, request, pk):
@@ -597,6 +661,7 @@ class BookSoldView(APIView):
             book.updated_at = now
             book.save(update_fields=['status', 'updated_at'])
         book = optimized_books_queryset().get(pk=book.pk)
+        prefetch_book_reviews([book])
         return Response(BookSerializer(book).data)
 
 

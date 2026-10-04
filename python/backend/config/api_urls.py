@@ -113,7 +113,7 @@ from books.sale_api_views import (
     SaleListingListCreateView,
 )
 from books.models import Category
-from books.category_taxonomy import category_order_expression
+from books.category_taxonomy import BOOK_CATEGORY_SLUGS, category_order_expression
 from books.request_api_views import (
     BookIntentSummaryView,
     BookRequestDetailView,
@@ -276,7 +276,10 @@ class CatalogOptionsView(APIView):
                 .values('id', 'name', 'code'),
             ),
             'categories': list(
-                Category.objects.filter(status='ACTIVE')
+                Category.objects.filter(
+                    status='ACTIVE',
+                    slug__in=BOOK_CATEGORY_SLUGS,
+                )
                 .annotate(_category_order=category_order_expression())
                 .order_by('_category_order', 'name', 'id')
                 .values('id', 'name', 'slug'),

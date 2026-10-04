@@ -2,11 +2,11 @@ from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.db import transaction
-from django.db.models import Q
 from rest_framework import serializers
 
 from users.models import Subject
 from config.cloudinary import verify_cloudinary_image
+from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .models import (
     Book,
     BookIdentifier,
@@ -246,10 +246,10 @@ class BookSerializer(serializers.Serializer):
 
     @staticmethod
     def get_reviews(book):
-        reviews = Review.objects.filter(
-            Q(sale_listing__book=book) | Q(lend_listing__book=book),
-        ).select_related('reviewer').order_by('-created_at', '-id')
-        return BookReviewSerializer(reviews, many=True).data
+        return BookReviewSerializer(
+            getattr(book, '_prefetched_book_reviews', ()),
+            many=True,
+        ).data
 
 
 class BookListSerializer(serializers.Serializer):
@@ -293,7 +293,11 @@ class BookWriteSerializer(serializers.Serializer):
         required=False, allow_null=True,
     )
     category_id = serializers.PrimaryKeyRelatedField(
-        source='category', queryset=Category.objects.filter(status='ACTIVE'),
+        source='category',
+        queryset=Category.objects.filter(
+            status='ACTIVE',
+            slug__in=BOOK_CATEGORY_SLUGS,
+        ),
         required=False, allow_null=True,
     )
     title = serializers.CharField(max_length=500, allow_blank=False, trim_whitespace=True)

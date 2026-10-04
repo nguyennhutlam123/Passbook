@@ -7,12 +7,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
         const response = await MessagingAPI.conversations();
         const conversations = Array.isArray(response) ? response : response.results || [];
-        list.replaceChildren(...(conversations.length
-            ? conversations.map((conversation) => PassbookMessagingComponents.conversationItem(conversation))
-            : [PassbookCommonComponents.emptyStateElement(
+        if (conversations.length) {
+            list.replaceChildren(...conversations.map((conversation) => PassbookMessagingComponents.conversationItem(conversation)));
+        } else {
+            const empty = PassbookCommonComponents.emptyStateElement(
                 "Chưa có cuộc hội thoại.",
-                "Khi nhắn tin với người bán hoặc người mượn, cuộc trò chuyện sẽ xuất hiện tại đây.",
-            )]));
+                "Khi bạn liên hệ người bán hoặc người mượn, cuộc trò chuyện sẽ xuất hiện tại đây.",
+            );
+            const browse = document.createElement("a");
+            browse.className = "button button-primary";
+            browse.href = "books.html";
+            browse.textContent = "Khám phá sách";
+            empty.append(browse);
+            list.replaceChildren(empty);
+        }
         list.querySelectorAll("[data-conversation-id]").forEach((item) => item.addEventListener("click", () => {
             void openConversationModal(item.dataset.conversationId);
         }));

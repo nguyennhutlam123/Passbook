@@ -819,6 +819,86 @@
     .profile-header {
         align-items: flex-start;
         flex-direction: column;
+        gap: 1rem;
+        padding: 1.1rem;
+        text-align: left;
+    }
+
+    .profile-header > #profile-overview,
+    .profile-overview,
+    .profile-section,
+    .profile-section__heading,
+    .profile-account-grid,
+    .profile-address-grid,
+    .profile-card,
+    .profile-address-list,
+    .profile-shortcuts {
+        text-align: left;
+        width: 100%;
+    }
+
+    .profile-title {
+        align-items: flex-start;
+        display: block;
+        overflow-wrap: anywhere;
+    }
+
+    .profile-title [data-profile-name] {
+        display: block;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+
+    .profile-title .verified {
+        display: inline-flex;
+        margin: .5rem 0 0;
+        transform: none;
+        vertical-align: middle;
+    }
+
+    .profile-meta {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .profile-meta__item {
+        align-items: flex-start;
+        border-radius: .75rem;
+        flex-wrap: wrap;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        width: 100%;
+    }
+
+    .profile-section__heading {
+        align-items: flex-start;
+        justify-content: flex-start;
+    }
+
+    .profile-account-grid,
+    .profile-address-grid {
+        justify-items: stretch;
+    }
+
+    .profile-card {
+        margin-left: 0;
+        margin-right: 0;
+    }
+
+    .profile-address-list .report-item {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    .profile-shortcuts {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .profile-shortcuts .button {
+        justify-content: flex-start;
+        text-align: left;
+        width: 100%;
     }
 
     .profile-account-grid,

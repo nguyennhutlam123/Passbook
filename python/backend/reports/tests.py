@@ -5,7 +5,11 @@ from django.test import SimpleTestCase
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from .admin_api_views import AdminReportDetailView, AdminReportUpdateSerializer
+from .admin_api_views import (
+    AdminReportDetailView,
+    AdminReportListView,
+    AdminReportUpdateSerializer,
+)
 from .api_views import MyReportListView
 from .dashboard_api_views import AdminDashboardView
 from .models import Report
@@ -65,6 +69,42 @@ class ReportAuthorizationTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 403)
         get_report.assert_not_called()
+
+    def test_admin_report_list_filters_by_a_valid_status(self):
+        self.user.role = 'ADMIN'
+        queryset = Mock()
+        queryset.select_related.return_value = queryset
+        queryset.order_by.return_value = queryset
+        queryset.filter.return_value = queryset
+        paginator = Mock()
+        paginator.paginate_queryset.return_value = []
+        paginator.get_paginated_response.side_effect = lambda data: Response(data)
+        request = self.factory.get('/api/admin/reports/', {'status': 'OPEN'})
+        force_authenticate(request, user=self.user)
+
+        with patch.object(
+            Report.objects,
+            'select_related',
+            return_value=queryset,
+        ), patch(
+            'reports.admin_api_views.BookPagination',
+            return_value=paginator,
+        ):
+            response = AdminReportListView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        queryset.filter.assert_called_once_with(status='OPEN')
+
+    def test_admin_report_list_rejects_unknown_status(self):
+        self.user.role = 'ADMIN'
+        request = self.factory.get('/api/admin/reports/', {'status': 'INVALID'})
+        force_authenticate(request, user=self.user)
+
+        with patch.object(Report.objects, 'select_related') as select_related:
+            response = AdminReportListView.as_view()(request)
+
+        self.assertEqual(response.status_code, 400)
+        select_related.assert_called_once()
 
 
 class AdminDashboardApiTests(SimpleTestCase):

@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    Book,
     BookRequest,
     BookWork,
     Category,
@@ -115,6 +116,110 @@ def request_payload(item):
         'created_at': item.created_at,
         'updated_at': item.updated_at,
     }
+
+
+def intent_summary(book, user=None):
+    now = timezone.now()
+    requests = BookRequest.objects.filter(
+        book_work_id=book.book_edition.book_work_id,
+        status='OPEN',
+    ).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+    )
+    buying_count = requests.filter(request_type='BUY').aggregate(
+        count=Count('user_id', distinct=True),
+    )['count']
+    selling_count = requests.filter(request_type='SELL_INTENT').aggregate(
+        count=Count('user_id', distinct=True),
+    )['count']
+    own = {}
+    if user is not None and user.is_authenticated:
+        own = {
+            item.request_type: item.id
+            for item in requests.filter(
+                user_id=user.id,
+                request_type__in=('BUY', 'SELL_INTENT'),
+            ).order_by('-created_at', '-id')
+        }
+    return {
+        'buying_count': buying_count,
+        'selling_count': selling_count,
+        'my_buy_request_id': own.get('BUY'),
+        'my_sell_intent_request_id': own.get('SELL_INTENT'),
+    }
+
+
+class BookIntentSummaryView(APIView):
+    def get_permissions(self):
+        return [AllowAny() if self.request.method == 'GET' else IsAuthenticated()]
+
+    def get(self, request, book_id):
+        book = get_object_or_404(
+            Book.objects.select_related('book_edition__book_work'),
+            pk=book_id,
+        )
+        return Response(intent_summary(book, request.user))
+
+    def post(self, request, book_id):
+        self._validate_request_type(request)
+        with transaction.atomic():
+            return self._change_intent(request, book_id, cancel=False)
+
+    def delete(self, request, book_id):
+        self._validate_request_type(request)
+        with transaction.atomic():
+            return self._change_intent(request, book_id, cancel=True)
+
+    @staticmethod
+    def _validate_request_type(request):
+        request_type = request.data.get('request_type')
+        if request_type not in ('BUY', 'SELL_INTENT'):
+            raise serializers.ValidationError({
+                'request_type': 'Chỉ hỗ trợ BUY hoặc SELL_INTENT.',
+            })
+        return request_type
+
+    @staticmethod
+    def _change_intent(request, book_id, *, cancel):
+        request_type = BookIntentSummaryView._validate_request_type(request)
+        book = get_object_or_404(
+            Book.objects.select_related('book_edition__book_work'),
+            pk=book_id,
+        )
+        work = BookWork.objects.select_for_update().get(
+            pk=book.book_edition.book_work_id,
+        )
+        existing = BookRequest.objects.select_for_update().filter(
+            user_id=request.user.id,
+            book_work_id=work.id,
+            request_type=request_type,
+        ).order_by('-created_at', '-id').first()
+        now = timezone.now()
+        if cancel:
+            if existing is None or existing.status != 'OPEN':
+                raise serializers.ValidationError('Không có dự định đang mở để hủy.')
+            existing.status = 'CANCELLED'
+            existing.updated_at = now
+            existing.save(update_fields=['status', 'updated_at'])
+        elif existing is not None:
+            if existing.status != 'OPEN' or (
+                existing.expires_at is not None and existing.expires_at <= now
+            ):
+                existing.status = 'OPEN'
+                existing.expires_at = None
+                existing.updated_at = now
+                existing.save(update_fields=['status', 'expires_at', 'updated_at'])
+        else:
+            BookRequest.objects.create(
+                user=request.user,
+                request_type=request_type,
+                book_work=work,
+                title_keyword=work.title,
+                status='OPEN',
+                created_at=now,
+                updated_at=now,
+            )
+        return Response(intent_summary(book, request.user))
 
 
 class BookRequestListCreateView(APIView):

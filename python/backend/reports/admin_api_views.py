@@ -11,6 +11,9 @@ from users.permissions import IsAdmin
 from .models import Report
 
 
+REPORT_STATUSES = ('OPEN', 'IN_REVIEW', 'RESOLVED', 'REJECTED')
+
+
 class AdminReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Report
@@ -35,7 +38,7 @@ class AdminReportSerializer(serializers.ModelSerializer):
 
 class AdminReportUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
-        choices=('OPEN', 'IN_REVIEW', 'RESOLVED', 'REJECTED'),
+        choices=REPORT_STATUSES,
     )
     resolution_note = serializers.CharField(
         required=False,
@@ -59,12 +62,7 @@ class AdminReportListView(APIView):
         ).order_by('-created_at', '-id')
         report_status = request.query_params.get('status')
         if report_status:
-            valid_statuses = {
-                value for value, _label in AdminReportUpdateSerializer().fields[
-                    'status'
-                ].choices
-            }
-            if report_status not in valid_statuses:
+            if report_status not in REPORT_STATUSES:
                 raise serializers.ValidationError({
                     'status': 'Trạng thái báo cáo không hợp lệ.',
                 })

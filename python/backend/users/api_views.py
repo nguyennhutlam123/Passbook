@@ -1,4 +1,5 @@
 from django.contrib.auth.hashers import check_password, make_password
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -45,6 +46,8 @@ class RegisterView(APIView):
                 'message': 'Đăng ký thành công. Vui lòng xác minh email.',
                 'verification_required': True,
                 'target': user.email,
+                'otp_expires_in_seconds': settings.OTP_LIFETIME_SECONDS,
+                'otp_resend_after_seconds': settings.OTP_RESEND_COOLDOWN_SECONDS,
                 'user': RegisteredUserSerializer(user).data,
             },
             status=status.HTTP_202_ACCEPTED,
@@ -109,6 +112,8 @@ class LoginView(APIView):
                     'verification_required': True,
                     'target': target,
                     'purpose': 'LOGIN',
+                    'otp_expires_in_seconds': settings.OTP_LIFETIME_SECONDS,
+                    'otp_resend_after_seconds': settings.OTP_RESEND_COOLDOWN_SECONDS,
                 },
                 status=status.HTTP_202_ACCEPTED,
             )

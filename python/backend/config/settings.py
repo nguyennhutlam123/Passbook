@@ -114,19 +114,16 @@ PASSBOOK_SMS_DELIVERY_BACKEND = os.environ.get(
     '',
 )
 
-EMAIL_BACKEND = os.environ.get(
-    'EMAIL_BACKEND',
-    'django.core.mail.backends.smtp.EmailBackend',
-)
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() == 'true'
-EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'False').lower() == 'true'
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
 DEFAULT_FROM_EMAIL = os.environ.get(
     'DEFAULT_FROM_EMAIL',
-    'noreply@passbook.local',
+    EMAIL_HOST_USER,
 )
 
 REST_FRAMEWORK = {
@@ -171,7 +168,7 @@ MYSQL_SSL_MODE = os.environ.get('MYSQL_SSL_MODE', 'DISABLED')
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('MYSQL_DATABASE', 'passbook_db'),
+        'NAME': os.environ.get('MYSQL_DATABASE', 'passbook_v12_lite_test'),
         'HOST': os.environ.get('MYSQL_HOST', '127.0.0.1'),
         'PORT': os.environ.get('MYSQL_PORT', '3308'),
         'USER': os.environ.get('MYSQL_USER', 'root'),

@@ -20,6 +20,13 @@ class BookSellerSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField(source='full_name')
     university_id = serializers.IntegerField(allow_null=True)
+    university = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_university(user):
+        if user.university_id is None or user.university is None:
+            return None
+        return {'id': user.university_id, 'name': user.university.name}
 
 
 class BookSubjectSerializer(serializers.ModelSerializer):
@@ -71,7 +78,33 @@ class BookSerializer(serializers.Serializer):
     price = serializers.DecimalField(max_digits=19, decimal_places=4, read_only=True)
     condition_status = serializers.CharField(read_only=True)
     condition_label = serializers.SerializerMethodField()
-    edition = serializers.CharField(read_only=True, allow_null=True)
+    edition = serializers.CharField(
+        source='book_edition.edition_name',
+        read_only=True,
+        allow_null=True,
+    )
+    edition_number = serializers.IntegerField(
+        source='book_edition.edition_number',
+        read_only=True,
+        allow_null=True,
+    )
+    book_work_id = serializers.IntegerField(
+        source='book_edition.book_work_id',
+        read_only=True,
+    )
+    author = serializers.CharField(
+        source='book_edition.book_work.author_name',
+        read_only=True,
+        allow_null=True,
+    )
+    publisher = serializers.CharField(
+        source='book_edition.publisher_name',
+        read_only=True,
+        allow_null=True,
+    )
+    condition_description = serializers.CharField(read_only=True, allow_null=True)
+    isbn = serializers.SerializerMethodField()
+    language = serializers.SerializerMethodField()
     publication_year = serializers.IntegerField(read_only=True, allow_null=True)
     status = serializers.SerializerMethodField()
     seller = BookSellerSerializer(read_only=True)
@@ -106,6 +139,23 @@ class BookSerializer(serializers.Serializer):
     def get_pickup_location(_book):
         return None
 
+    @staticmethod
+    def get_isbn(book):
+        identifiers = getattr(book.book_edition, 'identifiers', None)
+        if identifiers is None:
+            return None
+        for identifier in identifiers.all():
+            if 'ISBN' in identifier.identifier_type.upper():
+                return identifier.identifier_value
+        return None
+
+    @staticmethod
+    def get_language(book):
+        language = book.book_edition.language
+        if language is None:
+            return None
+        return {'id': language.id, 'name': language.name, 'code': language.code}
+
 
 class BookListSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
@@ -114,10 +164,17 @@ class BookListSerializer(serializers.Serializer):
     condition_status = serializers.CharField(read_only=True)
     condition_label = serializers.SerializerMethodField()
     publication_year = serializers.IntegerField(read_only=True, allow_null=True)
+    edition = serializers.CharField(
+        source='book_edition.edition_name',
+        read_only=True,
+        allow_null=True,
+    )
     primary_image = serializers.SerializerMethodField()
     subject = BookSubjectSerializer(read_only=True, allow_null=True)
     category = BookCategorySerializer(read_only=True, allow_null=True)
     seller = BookSellerSerializer(read_only=True)
+    buying_intent_count = serializers.IntegerField(read_only=True, default=0)
+    selling_intent_count = serializers.IntegerField(read_only=True, default=0)
 
     @staticmethod
     def get_condition_label(book):

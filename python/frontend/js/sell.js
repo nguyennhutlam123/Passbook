@@ -5,7 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const submitButton = form.querySelector("button[type='submit']");
     const previews = form.querySelector("[data-upload-previews]");
     const success = document.querySelector("[data-sell-success]");
-    let previewUrl = null;
+    let previewUrls = [];
     let editing = null;
 
     try {
@@ -19,10 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (target) target.textContent = message;
     };
 
-    if (!isLoggedIn()) {
-        window.location.href = "login.html";
-        return;
-    }
+    if (!PassbookGuards.requireAuth()) return;
 
     if (editing) {
         Object.entries({
@@ -34,8 +31,6 @@ document.addEventListener("DOMContentLoaded", () => {
             publication_year: editing.publication_year,
             subject_id: editing.subject?.id,
             category_id: editing.category?.id,
-            pickup_location_id: editing.pickup_location?.id,
-            pickup_note: editing.pickup_note,
         }).forEach(([name, value]) => {
             if (value !== undefined && value !== null && form.elements[name]) {
                 form.elements[name].value = value;
@@ -53,16 +48,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     imageFileInput?.addEventListener("change", () => {
         setError("images");
-        const file = imageFileInput.files[0];
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        previewUrl = file ? URL.createObjectURL(file) : null;
+        previewUrls.forEach((url) => URL.revokeObjectURL(url));
+        previewUrls = [];
         previews.replaceChildren();
-        if (previewUrl) {
+        Array.from(imageFileInput.files || []).forEach((file) => {
+            const validationError = validateImageFile(file);
+            if (validationError) {
+                setError("images", validationError);
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            previewUrls.push(url);
             const preview = document.createElement("img");
             preview.alt = "Ảnh xem trước";
-            preview.src = previewUrl;
+            preview.src = url;
             previews.append(preview);
-        }
+        });
     });
 
     form.addEventListener("submit", async (event) => {
@@ -77,11 +78,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!Number(data.get("price")) || Number(data.get("price")) <= 0) errors.price = "Giá phải lớn hơn 0.";
         if (!data.get("condition")) errors.condition = "Vui lòng chọn tình trạng.";
         if (!data.get("description")?.toString().trim()) errors.description = "Mô tả không được để trống.";
-        const imageFile = imageFileInput?.files[0];
-        if (!editing) {
-            const imageError = validateImageFile(imageFile);
-            if (imageError) errors.images = imageError;
+        const imageFiles = Array.from(imageFileInput?.files || []);
+        if (!editing && imageFiles.length === 0) {
+            errors.images = "Vui lòng chọn ít nhất một ảnh.";
         }
+        const invalidImage = imageFiles.map(validateImageFile).find(Boolean);
+        if (invalidImage) errors.images = invalidImage;
         Object.entries(errors).forEach(([field, message]) => setError(field, message));
         if (Object.keys(errors).length) return;
 
@@ -96,43 +98,27 @@ document.addEventListener("DOMContentLoaded", () => {
             publication_year: data.get("publication_year") ? Number(data.get("publication_year")) : null,
             subject_id: Number(data.get("subject_id")),
             category_id: data.get("category_id") ? Number(data.get("category_id")) : null,
-            pickup_location_id: data.get("pickup_location_id") ? Number(data.get("pickup_location_id")) : null,
-            pickup_note: data.get("pickup_note") || "",
         };
 
         let operation = editing ? "cập nhật tin đăng" : "tạo tin đăng";
+        let createdBook = null;
         try {
             const book = editing
-                ? await api.patch(`/books/${editing.id}/`, payload)
-                : await api.post("/books/", payload);
-            if (imageFile) {
+                ? await BooksAPI.update(editing.id, payload)
+                : await BooksAPI.create(payload);
+            if (!editing) createdBook = book;
+            if (imageFiles.length) {
                 operation = "lấy chữ ký Cloudinary";
                 submitButton.textContent = "Đang tải ảnh...";
-                const signatureData = await api.get("/uploads/cloudinary/signature/");
-                const uploadData = new FormData();
-                uploadData.append("file", imageFile);
-                uploadData.append("api_key", signatureData.api_key);
-                uploadData.append("timestamp", signatureData.timestamp);
-                uploadData.append("folder", signatureData.folder);
-                uploadData.append("signature", signatureData.signature);
-                operation = "upload ảnh Cloudinary";
-                const uploadResponse = await fetch(
-                    `https://api.cloudinary.com/v1_1/${encodeURIComponent(signatureData.cloud_name)}/image/upload`,
-                    {method: "POST", body: uploadData},
-                );
-                const uploadedImage = await uploadResponse.json();
-                if (!uploadResponse.ok || !uploadedImage.secure_url) {
-                    throw new Error(uploadedImage.error?.message || "Không thể tải ảnh lên Cloudinary.");
+                const signature = await BooksAPI.cloudinarySignature();
+                for (const [index, imageFile] of imageFiles.entries()) {
+                    operation = "tải ảnh lên và lưu liên kết ảnh";
+                    await BooksAPI.uploadImage(book.id, imageFile, {
+                        signature,
+                        isPrimary: index === 0,
+                        sortOrder: index,
+                    });
                 }
-                if (!/^https:\/\//i.test(uploadedImage.secure_url)) {
-                    throw new Error("Cloudinary không trả về secure URL hợp lệ.");
-                }
-                operation = "lưu liên kết ảnh";
-                await api.post(`/books/${book.id}/images/`, {
-                    image_url: uploadedImage.secure_url,
-                    is_primary: true,
-                    sort_order: 0,
-                });
             }
 
             localStorage.removeItem("editingListing");
@@ -140,12 +126,20 @@ document.addEventListener("DOMContentLoaded", () => {
             success.hidden = false;
             showToast(editing ? "Đã cập nhật tin đăng." : "Đăng tin thành công.");
         } catch (error) {
+            if (createdBook) {
+                editing = createdBook;
+                localStorage.setItem("editingListing", JSON.stringify(createdBook));
+            }
             const fieldErrors = error.payload && typeof error.payload === "object" ? error.payload : {};
             Object.entries(fieldErrors).forEach(([field, message]) => {
                 const formField = field === "condition_status" ? "condition" : field;
                 setError(formField, Array.isArray(message) ? message.join(" ") : String(message));
             });
-            showToast(`Lỗi khi ${operation}: ${error.message}`);
+            showToast(
+                createdBook
+                    ? `Tin đã tạo nhưng lỗi khi ${operation}. Đã lưu bản chỉnh sửa để bạn có thể tải ảnh/thử lại: ${error.message}`
+                    : `Lỗi khi ${operation}: ${error.message}`,
+            );
         } finally {
             submitButton.disabled = false;
             submitButton.textContent = editing ? "Cập nhật tin" : "Đăng tin";
@@ -153,8 +147,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.querySelector("[data-new-listing]")?.addEventListener("click", () => {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        previewUrl = null;
+        previewUrls.forEach((url) => URL.revokeObjectURL(url));
+        previewUrls = [];
         editing = null;
         localStorage.removeItem("editingListing");
         form.reset();

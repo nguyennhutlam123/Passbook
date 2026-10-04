@@ -4,6 +4,8 @@ import time
 from django.conf import settings
 from django.http import JsonResponse
 from django.urls import path
+from rest_framework import serializers
+from rest_framework.permissions import AllowAny
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,6 +22,7 @@ from users.api_views import (
     UserAddressDetailView,
     UserAddressListCreateView,
 )
+from users.models import Faculty, Language, Major, Subject, University
 from users.otp_api_views import (
     ChangeContactRequestView,
     ForgotPasswordView,
@@ -52,6 +55,7 @@ from books.api_views import (
     MyBooksView,
 )
 from users.admin_api_views import (
+    AdminUserListView,
     AdminUserStatusView,
     AdminUserViolationDetailView,
     AdminUserViolationListCreateView,
@@ -68,6 +72,7 @@ from books.commerce_api_views import (
     CartView,
     CheckoutView,
     LendListingListCreateView,
+    LendListingDetailView,
     OrderDetailView,
     OrderListView,
     OrderCancelView,
@@ -85,7 +90,9 @@ from books.sale_api_views import (
     SaleListingDetailView,
     SaleListingListCreateView,
 )
+from books.models import Category
 from books.request_api_views import (
+    BookIntentSummaryView,
     BookRequestDetailView,
     BookRequestInterestView,
     BookRequestListCreateView,
@@ -119,7 +126,7 @@ class CloudinaryUploadSignatureView(APIView):
 
         timestamp = int(time.time())
         parameters = {
-            'folder': settings.CLOUDINARY_UPLOAD_FOLDER,
+            'asset_folder': settings.CLOUDINARY_UPLOAD_FOLDER,
             'timestamp': timestamp,
         }
         signature_base = '&'.join(
@@ -131,14 +138,66 @@ class CloudinaryUploadSignatureView(APIView):
         return Response({
             'cloud_name': settings.CLOUDINARY_CLOUD_NAME,
             'api_key': settings.CLOUDINARY_API_KEY,
-            'folder': settings.CLOUDINARY_UPLOAD_FOLDER,
+            'asset_folder': settings.CLOUDINARY_UPLOAD_FOLDER,
             'timestamp': timestamp,
             'signature': signature,
         })
 
 
+class CatalogOptionsView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        faculties = Faculty.objects.filter(status='ACTIVE')
+        majors = Major.objects.filter(status='ACTIVE')
+        university_id = self._optional_id(request, 'university_id')
+        faculty_id = self._optional_id(request, 'faculty_id')
+        if university_id:
+            faculties = faculties.filter(university_id=university_id)
+        if faculty_id:
+            majors = majors.filter(faculty_id=faculty_id)
+        return Response({
+            'universities': list(
+                University.objects.filter(status='ACTIVE')
+                .order_by('name', 'id')
+                .values('id', 'name'),
+            ),
+            'faculties': list(faculties.order_by('name', 'id').values('id', 'name', 'university_id')),
+            'majors': list(majors.order_by('name', 'id').values('id', 'name', 'faculty_id')),
+            'subjects': list(
+                Subject.objects.filter(status='ACTIVE')
+                .order_by('name', 'id')
+                .values('id', 'name', 'code'),
+            ),
+            'categories': list(
+                Category.objects.filter(status='ACTIVE')
+                .order_by('name', 'id')
+                .values('id', 'name'),
+            ),
+            'languages': list(
+                Language.objects.filter(status='ACTIVE')
+                .order_by('name', 'id')
+                .values('id', 'name', 'code'),
+            ),
+        })
+
+    @staticmethod
+    def _optional_id(request, key):
+        value = request.query_params.get(key)
+        if not value:
+            return None
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise serializers.ValidationError({key: f'{key} phải là số nguyên.'}) from exc
+        if parsed < 1:
+            raise serializers.ValidationError({key: f'{key} phải lớn hơn 0.'})
+        return parsed
+
+
 urlpatterns = [
     path('health/', health_check, name='health-check'),
+    path('catalog/options/', CatalogOptionsView.as_view(), name='catalog-options'),
     path(
         'uploads/cloudinary/signature/',
         CloudinaryUploadSignatureView.as_view(),
@@ -193,6 +252,11 @@ urlpatterns = [
     ),
     path('users/violations/', MyViolationListView.as_view(), name='my-violation-list'),
     path(
+        'admin/users/',
+        AdminUserListView.as_view(),
+        name='admin-user-list',
+    ),
+    path(
         'admin/users/<int:user_id>/violations/',
         AdminUserViolationListCreateView.as_view(),
         name='admin-user-violations',
@@ -208,6 +272,7 @@ urlpatterns = [
         name='admin-user-status',
     ),
     path('books/', BookListView.as_view(), name='book-list'),
+    path('books/<int:book_id>/intents/', BookIntentSummaryView.as_view(), name='book-intents'),
     path('sale-listings/', SaleListingListCreateView.as_view(), name='sale-listing-list-create'),
     path('sale-listings/<int:listing_id>/', SaleListingDetailView.as_view(), name='sale-listing-detail'),
     path('book-requests/', BookRequestListCreateView.as_view(), name='book-request-list-create'),
@@ -232,6 +297,7 @@ urlpatterns = [
     path('cart/items/<int:item_id>/', CartItemDetailView.as_view(), name='cart-item-detail'),
     path('checkout/', CheckoutView.as_view(), name='checkout'),
     path('lend-listings/', LendListingListCreateView.as_view(), name='lend-listings'),
+    path('lend-listings/<int:listing_id>/', LendListingDetailView.as_view(), name='lend-listing-detail'),
     path('orders/', OrderListView.as_view(), name='order-list'),
     path('orders/<int:order_id>/cancel/', OrderCancelView.as_view(), name='order-cancel'),
     path('orders/<int:order_id>/', OrderDetailView.as_view(), name='order-detail'),

@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -9,6 +10,65 @@ from rest_framework.views import APIView
 from books.pagination import BookPagination
 from .models import User, UserViolation
 from .permissions import IsAdmin
+
+
+class AdminUserListSerializer(serializers.ModelSerializer):
+    university_name = serializers.CharField(
+        source='university.name',
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'email',
+            'full_name',
+            'phone',
+            'role',
+            'status',
+            'university_name',
+            'created_at',
+        )
+        read_only_fields = fields
+
+
+class AdminUserListView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        users = User.objects.select_related('university').order_by(
+            '-created_at', '-id',
+        )
+        search = request.query_params.get('search', '').strip()
+        status_filter = request.query_params.get('status', '').strip()
+        role_filter = request.query_params.get('role', '').strip()
+
+        if search:
+            users = users.filter(
+                Q(email__icontains=search)
+                | Q(full_name__icontains=search)
+                | Q(phone__icontains=search)
+            )
+        if status_filter:
+            if status_filter not in dict(User.STATUS_CHOICES):
+                raise serializers.ValidationError({
+                    'status': 'Trạng thái tài khoản không hợp lệ.',
+                })
+            users = users.filter(status=status_filter)
+        if role_filter:
+            if role_filter not in dict(User.ROLE_CHOICES):
+                raise serializers.ValidationError({
+                    'role': 'Vai trò tài khoản không hợp lệ.',
+                })
+            users = users.filter(role=role_filter)
+
+        paginator = BookPagination()
+        page = paginator.paginate_queryset(users, request, view=self)
+        return paginator.get_paginated_response(
+            AdminUserListSerializer(page, many=True).data,
+        )
 
 
 class UserViolationSerializer(serializers.ModelSerializer):

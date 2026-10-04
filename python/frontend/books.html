@@ -11,7 +11,7 @@
     <main class="page-shell catalog-page">
         <div class="catalog-search">
             <label class="sr-only" for="catalog-query">Tìm giáo trình</label>
-            <input id="catalog-query" type="search" placeholder="Tìm tên sách, môn học hoặc danh mục...">
+            <input id="catalog-query" type="search" placeholder="Tìm tên sách, môn học, mã môn hoặc mã ISBN..." autocomplete="off">
             <button class="button button-primary" type="button" data-search-submit>🔍 Tìm kiếm</button>
         </div>
         <div class="catalog-layout">
@@ -21,40 +21,55 @@
                     <button class="button button-outline filter-close" type="button" data-filter-close>Đóng</button>
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="filter-school">Trường</label>
-                    <select id="filter-school">
-                        <option value="">Tất cả trường</option>
-                        <option value="1">Đại học Sư phạm Thành phố Hồ Chí Minh</option>
-                        <option value="2">Đại học Kinh tế Thành phố Hồ Chí Minh</option>
-                        <option value="3">Đại học Quốc gia Thành phố Hồ Chí Minh</option>
+                    <label class="form-label" for="filter-listing-type">Hình thức</label>
+                    <select id="filter-listing-type">
+                        <option value="SALE">Đang bán</option>
+                        <option value="BORROW">Cho mượn</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-school">Trường</label>
+                    <select id="filter-school"><option value="">Tất cả trường</option></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-faculty">Khoa</label>
+                    <select id="filter-faculty" disabled><option value="">Tất cả khoa</option></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-major">Ngành</label>
+                    <select id="filter-major" disabled><option value="">Tất cả ngành</option></select>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="filter-subject">Môn học</label>
-                    <select id="filter-subject">
-                        <option value="">Tất cả môn học</option>
-                        <option value="1">Cơ học</option>
-                        <option value="2">Điện học</option>
-                        <option value="3">Đại số</option>
-                    </select>
+                    <select id="filter-subject"><option value="">Tất cả môn học</option></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-subject-code">Mã môn</label>
+                    <input id="filter-subject-code" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-author">Tác giả</label>
+                    <input id="filter-author" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-isbn">ISBN</label>
+                    <input id="filter-isbn" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-edition">Phiên bản</label>
+                    <input id="filter-edition" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-year">Năm xuất bản</label>
+                    <input id="filter-year" type="number" min="1" max="9999" inputmode="numeric">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-language">Ngôn ngữ</label>
+                    <select id="filter-language"><option value="">Tất cả ngôn ngữ</option></select>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="filter-category">Danh mục</label>
-                    <select id="filter-category">
-                        <option value="">Tất cả danh mục</option>
-                        <option value="1">Giáo trình</option>
-                        <option value="3">Sách tham khảo</option>
-                        <option value="4">Dụng cụ học tập</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="filter-location">Địa điểm</label>
-                    <select id="filter-location">
-                        <option value="">Tất cả địa điểm</option>
-                        <option value="1">Thư viện</option>
-                        <option value="2">Căn tin</option>
-                        <option value="3">Sảnh khoa Vật lý</option>
-                    </select>
+                    <select id="filter-category"><option value="">Tất cả danh mục</option></select>
                 </div>
                 <fieldset class="filter-fieldset">
                     <legend class="form-label">Tình trạng</legend>
@@ -65,13 +80,13 @@
                 </fieldset>
                 <div class="form-group">
                     <label class="form-label" for="filter-min-price">Giá tối thiểu</label>
-                    <input id="filter-min-price" type="number" min="0" step="1000" placeholder="0">
+                    <input id="filter-min-price" type="number" min="0" step="1000" placeholder="Không giới hạn">
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="filter-price">Giá tối đa</label>
-                    <input id="filter-price" type="range" min="0" max="1000000" step="10000" value="1000000">
-                    <output id="price-output" for="filter-price">1.000.000đ</output>
+                    <label class="form-label" for="filter-max-price">Giá tối đa</label>
+                    <input id="filter-max-price" type="number" min="0" step="1000" placeholder="Không giới hạn">
                 </div>
+                <p class="caption">Kết quả chỉ gồm tin đang hoạt động theo hình thức đã chọn.</p>
                 <button class="button button-outline" type="button" data-reset-filters>Xóa bộ lọc</button>
             </aside>
             <section class="catalog-results" aria-live="polite">
@@ -89,6 +104,7 @@
                         </select>
                     </label>
                 </div>
+                <p class="form-error" role="alert" data-filter-error></p>
                 <div class="book-grid" data-catalog-grid></div>
                 <div class="empty-state" data-catalog-empty hidden>
                     <span aria-hidden="true">🔍</span>
@@ -106,7 +122,30 @@
         </div>
     </main>
     <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/components/commerce/cards.js"></script>
+    <script src="js/components/messaging/cards.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/orders-api.js"></script>
+    <script src="js/api/payments-api.js"></script>
+    <script src="js/api/shipping-api.js"></script>
+    <script src="js/api/returns-api.js"></script>
+    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
+    <script src="js/api/admin-api.js"></script>
     <script src="js/main.js"></script>
     <script src="js/books.js"></script>
 </body>

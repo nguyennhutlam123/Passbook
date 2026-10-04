@@ -1,12 +1,9 @@
 document.addEventListener("DOMContentLoaded", async () => {
     if (!document.querySelector("[data-profile-page]")) return;
-    if (!isLoggedIn()) {
-        window.location.href = "login.html";
-        return;
-    }
+    if (!PassbookGuards.requireAuth()) return;
     const grid = document.querySelector("[data-profile-grid]");
     const empty = document.querySelector("[data-profile-empty]");
-    const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
+    const user = PassbookAuth.getCurrentUser() || {};
     document.querySelector("[data-profile-name]").firstChild.textContent = `${user.name || "Người dùng"} `;
     document.querySelector("[data-profile-school]").textContent = user.email || "";
     let activeTab = "available";
@@ -30,21 +27,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         }));
         grid.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", async () => {
             if (!window.confirm("Bạn có chắc muốn xóa tin đăng này?")) return;
-            try { await api.delete(`/books/${button.dataset.delete}/`); await loadBooks(); showToast("Đã xóa tin đăng."); }
+            try { await BooksAPI.delete(button.dataset.delete); await loadBooks(); showToast("Đã xóa tin đăng."); }
             catch (error) { showToast(error.message); }
         }));
         grid.querySelectorAll("[data-sold]").forEach((button) => button.addEventListener("click", async () => {
-            try { await api.patch(`/books/${button.dataset.sold}/sold/`, {}); await loadBooks(); showToast("Đã đánh dấu đã bán."); }
+            try { await BooksAPI.markSold(button.dataset.sold); await loadBooks(); showToast("Đã đánh dấu đã bán."); }
             catch (error) { showToast(error.message); }
         }));
         bindFavoriteButtons(grid);
     };
     const loadBooks = async () => {
         try {
-            const data = await api.get("/my-books/?page_size=50");
+            const data = await BooksAPI.mine({page_size: 50});
             books = data.results;
             render();
-        } catch (error) { grid.innerHTML = `<div class="empty-state">${error.message}</div>`; }
+        } catch (error) { grid.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`; }
     };
     document.querySelectorAll("[data-profile-tab]").forEach((tab) => tab.addEventListener("click", async () => {
         activeTab = tab.dataset.profileTab;
@@ -54,25 +51,32 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
         if (activeTab === "saved") {
             try {
-                const data = await api.get("/favorites/?page_size=50");
+                const data = await FavoritesAPI.list({page_size: 50});
                 books = data.results.map((item) => item.book);
             } catch (error) { showToast(error.message); }
         } else await loadBooks();
         render();
     }));
-    await loadFavoriteBookIds();
+    try {
+        await loadFavoriteBookIds();
+    } catch (error) {
+        showToast(error.message);
+    }
     await loadBooks();
     const conversationList = document.querySelector("[data-conversation-list]");
     try {
-        const conversations = await api.get("/conversations/");
-        conversationList.innerHTML = conversations.length ? conversations.map((conversation) => `<button class="conversation-list-item" type="button" data-conversation-id="${conversation.id}"><strong>${escapeHtml(conversation.book.title)}</strong><span>${escapeHtml(conversation.buyer.name)} ↔ ${escapeHtml(conversation.seller.name)}</span><time>${new Date(conversation.updated_at).toLocaleString("vi-VN")}</time></button>`).join("") : '<p class="caption">Chưa có cuộc hội thoại.</p>';
+        const conversationData = await MessagingAPI.conversations();
+        const conversations = Array.isArray(conversationData) ? conversationData : conversationData.results || [];
+        conversationList.replaceChildren(...(conversations.length
+            ? conversations.map((conversation) => PassbookMessagingComponents.conversationItem(conversation))
+            : [PassbookCommonComponents.emptyState("Chưa có cuộc hội thoại.")]));
         conversationList.querySelectorAll("[data-conversation-id]").forEach((item) => item.addEventListener("click", () => openConversationModal(item.dataset.conversationId)));
     } catch (error) {
-        conversationList.innerHTML = `<p class="caption">${escapeHtml(error.message)}</p>`;
+        conversationList.replaceChildren(PassbookCommonComponents.emptyState(error.message));
     }
     const reportList = document.querySelector("[data-report-list]");
     try {
-        const reports = await api.get("/reports/my/?page_size=50");
+        const reports = await ReportsAPI.mine({page_size: 50});
         reportList.innerHTML = reports.results?.length ? reports.results.map((report) => `<article class="report-item"><strong>${escapeHtml(report.reason)}</strong><span>Sách #${report.book_id || "—"} · ${escapeHtml(report.status)}</span><time>${new Date(report.created_at).toLocaleString("vi-VN")}</time></article>`).join("") : '<p class="caption">Chưa có báo cáo.</p>';
     } catch (error) {
         reportList.innerHTML = `<p class="caption">${escapeHtml(error.message)}</p>`;

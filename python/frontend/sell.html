@@ -78,29 +78,10 @@
                 </div>
                 <div class="form-group form-group--wide">
                     <label class="form-label" for="book-image-file">Ảnh giáo trình *</label>
-                    <input id="book-image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
-                    <span class="caption">Chọn một ảnh JPG, PNG, WebP hoặc GIF (tối đa 10 MB).</span>
+                    <input id="book-image-file" name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+                    <span class="caption">Chọn một hoặc nhiều ảnh JPG, PNG, WebP hoặc GIF (tối đa 10 MB mỗi ảnh).</span>
                     <span class="form-error" data-error-for="images"></span>
                     <div class="upload-previews" data-upload-previews></div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="book-location">Địa điểm giao nhận</label>
-                    <select id="book-location" name="pickup_location_id">
-                        <option value="">Chọn địa điểm</option>
-                        <option value="1">Thư viện</option>
-                        <option value="5">Thư viện trung tâm</option>
-                        <option value="6">Sảnh tòa A</option>
-                        <option value="7">Cổng chính</option>
-                        <option value="8">Ký túc xá khu A</option>
-                        <option value="9">Căng tin sinh viên</option>
-                        <option value="10">Tòa nhà thực hành</option>
-                        <option value="15">Khu giảng đường B</option>
-                        <option value="16">Trung tâm học liệu</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="book-meeting-time">Thời gian giao nhận</label>
-                    <input id="book-meeting-time" name="pickup_note" type="text" placeholder="Ví dụ: Sau giờ học">
                 </div>
             </div>
             <button class="button button-primary" type="submit">Đăng tin</button>
@@ -116,7 +97,30 @@
         </section>
     </main>
     <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/components/commerce/cards.js"></script>
+    <script src="js/components/messaging/cards.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/orders-api.js"></script>
+    <script src="js/api/payments-api.js"></script>
+    <script src="js/api/shipping-api.js"></script>
+    <script src="js/api/returns-api.js"></script>
+    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
+    <script src="js/api/admin-api.js"></script>
     <script src="js/main.js"></script>
     <script src="js/sell.js"></script>
 </body>

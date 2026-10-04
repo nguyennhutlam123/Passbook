@@ -4,7 +4,8 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Q, Sum
+from django.db.models import Count, Exists, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -16,7 +17,9 @@ from rest_framework.views import APIView
 from users.models import UserAddress
 from .models import (
     Book,
+    BookImage,
     BookIdentifier,
+    BookRequest,
     BookReservation,
     BorrowTerms,
     BorrowOrder,
@@ -532,7 +535,54 @@ class LendListingListCreateView(APIView):
             Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
         ).select_related(
             'book__book_edition__book_work',
-            'lender',
+            'book__book_edition__book_work__category',
+            'book__book_edition__language',
+            'lender__university',
+        )
+        subject_links = BookWorkSubject.objects.filter(
+            is_primary=True,
+        ).select_related('subject')
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                'book__images',
+                queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
+                to_attr='catalog_images',
+            ),
+            Prefetch(
+                'book__book_edition__book_work__subject_links',
+                queryset=subject_links,
+                to_attr='primary_subject_links',
+            ),
+        )
+        active_intents = BookRequest.objects.filter(
+            book_work_id=OuterRef('book__book_edition__book_work_id'),
+            status='OPEN',
+        ).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+        )
+        queryset = queryset.annotate(
+            buying_intent_count=Coalesce(
+                Subquery(
+                    active_intents.filter(request_type='BUY')
+                    .order_by()
+                    .values('book_work_id')
+                    .annotate(total=Count('user_id', distinct=True))
+                    .values('total')[:1],
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            ),
+            selling_intent_count=Coalesce(
+                Subquery(
+                    active_intents.filter(request_type='SELL_INTENT')
+                    .order_by()
+                    .values('book_work_id')
+                    .annotate(total=Count('user_id', distinct=True))
+                    .values('total')[:1],
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            ),
         )
         params = request.query_params
         search = (params.get('search') or '').strip()
@@ -562,6 +612,36 @@ class LendListingListCreateView(APIView):
                 | Q(_subject_match=True)
                 | Q(_identifier_match=True),
             )
+        subject_id = _query_integer(params, 'subject_id')
+        if subject_id is not None:
+            queryset = queryset.filter(Exists(
+                BookWorkSubject.objects.filter(
+                    book_work_id=OuterRef('book__book_edition__book_work_id'),
+                    subject_id=subject_id,
+                ),
+            ))
+        subject_code = (params.get('subject_code') or '').strip()
+        if subject_code:
+            queryset = queryset.filter(Exists(
+                BookWorkSubject.objects.filter(
+                    book_work_id=OuterRef('book__book_edition__book_work_id'),
+                    subject__code__icontains=subject_code,
+                ),
+            ))
+        author = (params.get('author') or '').strip()
+        if author:
+            queryset = queryset.filter(
+                book__book_edition__book_work__author_name__icontains=author,
+            )
+        isbn = (params.get('isbn') or '').strip()
+        if isbn:
+            queryset = queryset.filter(Exists(
+                BookIdentifier.objects.filter(
+                    book_edition_id=OuterRef('book__book_edition_id'),
+                    identifier_type__icontains='ISBN',
+                    identifier_value__icontains=isbn,
+                ),
+            ))
         category_id = _query_integer(params, 'category_id')
         if category_id is not None:
             queryset = queryset.filter(
@@ -575,6 +655,20 @@ class LendListingListCreateView(APIView):
         language_id = _query_integer(params, 'language_id')
         if language_id is not None:
             queryset = queryset.filter(book__book_edition__language_id=language_id)
+        edition = (params.get('edition') or '').strip()
+        if edition:
+            queryset = queryset.filter(
+                book__book_edition__edition_name__icontains=edition,
+            )
+        university_id = _query_integer(params, 'university_id')
+        if university_id is not None:
+            queryset = queryset.filter(lender__university_id=university_id)
+        faculty_id = _query_integer(params, 'faculty_id')
+        if faculty_id is not None:
+            queryset = queryset.filter(lender__faculty_id=faculty_id)
+        major_id = _query_integer(params, 'major_id')
+        if major_id is not None:
+            queryset = queryset.filter(lender__major_id=major_id)
         condition = params.get('condition_status')
         if condition:
             if condition not in {value for value, _ in Book.CONDITION_CHOICES}:
@@ -683,7 +777,57 @@ class LendListingInputSerializer(serializers.Serializer):
     terms_notes = serializers.CharField(required=False, allow_blank=True)
 
 
+class LendListingDetailView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, listing_id):
+        listing = get_object_or_404(
+            LendListing.objects.filter(
+                status='ACTIVE',
+                book__status='AVAILABLE',
+            ).filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+            ).select_related(
+                'book__book_edition__book_work__category',
+                'book__book_edition__language',
+                'lender__university',
+            ).prefetch_related(
+                Prefetch(
+                    'book__images',
+                    queryset=BookImage.objects.order_by('sort_order', 'id'),
+                    to_attr='catalog_images',
+                ),
+                Prefetch(
+                    'book__book_edition__book_work__subject_links',
+                    queryset=BookWorkSubject.objects.filter(
+                        is_primary=True,
+                    ).select_related('subject'),
+                    to_attr='primary_subject_links',
+                ),
+            ),
+            pk=listing_id,
+        )
+        return Response(lend_listing_payload(listing))
+
+
 def lend_listing_payload(listing):
+    book = listing.book
+    edition = book.book_edition
+    work = edition.book_work
+    subject_links = getattr(work, 'primary_subject_links', ())
+    subject = subject_links[0].subject if subject_links else None
+    images = getattr(book, 'catalog_images', None)
+    if images is None:
+        images = list(book.images.order_by('sort_order', 'id'))
+    primary_image = next(
+        (image for image in images if image.is_primary),
+        images[0] if images else None,
+    )
+    language = edition.language
+    condition_label = dict(Book.CONDITION_CHOICES).get(
+        book.condition_status,
+        book.condition_label,
+    )
     return {
         'id': listing.id,
         'book_id': listing.book_id,
@@ -694,6 +838,81 @@ def lend_listing_payload(listing):
         'deposit_amount': str(listing.deposit_amount) if listing.deposit_amount is not None else None,
         'rental_fee': str(listing.rental_fee),
         'currency': listing.currency,
+        'primary_image': primary_image.image_url if primary_image else None,
+        'condition_status': book.condition_status,
+        'condition_label': condition_label,
+        'edition': edition.edition_name,
+        'publication_year': edition.publication_year,
+        'buying_intent_count': getattr(listing, 'buying_intent_count', 0),
+        'selling_intent_count': getattr(listing, 'selling_intent_count', 0),
+        'subject': (
+            {'id': subject.id, 'name': subject.name, 'code': subject.code}
+            if subject else None
+        ),
+        'category': (
+            {'id': work.category_id, 'name': work.category.name}
+            if work.category_id else None
+        ),
+        'seller': {
+            'id': listing.lender_id,
+            'name': listing.lender.full_name,
+            'university': (
+                {
+                    'id': listing.lender.university_id,
+                    'name': listing.lender.university.name,
+                }
+                if listing.lender.university_id else None
+            ),
+        },
+        'book': {
+            'id': book.id,
+            'title': listing.title,
+            'description': listing.description,
+            'price': str(listing.rental_fee),
+            'status': 'available',
+            'condition_status': book.condition_status,
+            'condition_label': condition_label,
+            'condition_description': book.condition_description,
+            'edition': edition.edition_name,
+            'edition_number': edition.edition_number,
+            'publication_year': edition.publication_year,
+            'author': work.author_name,
+            'publisher': edition.publisher_name,
+            'book_work_id': work.id,
+            'buying_intent_count': getattr(listing, 'buying_intent_count', 0),
+            'selling_intent_count': getattr(listing, 'selling_intent_count', 0),
+            'language': (
+                {'id': language.id, 'name': language.name, 'code': language.code}
+                if language else None
+            ),
+            'subject': (
+                {'id': subject.id, 'name': subject.name, 'code': subject.code}
+                if subject else None
+            ),
+            'category': (
+                {'id': work.category_id, 'name': work.category.name}
+                if work.category_id else None
+            ),
+            'seller': {
+                'id': listing.lender_id,
+                'name': listing.lender.full_name,
+                'university': (
+                    {
+                        'id': listing.lender.university_id,
+                        'name': listing.lender.university.name,
+                    }
+                    if listing.lender.university_id else None
+                ),
+            },
+            'images': [
+                {
+                    'id': image.id,
+                    'image_url': image.image_url,
+                    'is_primary': image.is_primary,
+                }
+                for image in images
+            ],
+        },
         'created_at': listing.created_at,
     }
 
@@ -993,11 +1212,9 @@ class RefundCreateView(APIView):
             Payment.objects.select_for_update(),
             pk=serializer.validated_data['payment_id'],
             order=order,
-            status='PAID',
         )
         amount = serializer.validated_data['amount']
-        if amount > payment.amount:
-            raise serializers.ValidationError('Số tiền hoàn vượt quá số tiền đã thanh toán.')
+        idempotency_key = serializer.validated_data['idempotency_key']
         item = None
         borrow_order = None
         return_record = None
@@ -1027,12 +1244,28 @@ class RefundCreateView(APIView):
                     'Yêu cầu trả hàng cần được người bán chấp thuận trước khi hoàn tiền.',
                 )
             item = return_record.sale_order_item
-        existing = Refund.objects.filter(
+        existing = Refund.objects.select_for_update().filter(
             provider=payment.provider,
-            idempotency_key=serializer.validated_data['idempotency_key'],
+            idempotency_key=idempotency_key,
         ).first()
         if existing is not None:
-            if existing.order_id != order.id or existing.amount != amount:
+            existing_targets = (
+                existing.sale_order_item_id,
+                existing.borrow_order_id,
+                existing.return_record_id,
+            )
+            requested_targets = (
+                item.id if item is not None else None,
+                borrow_order.id if borrow_order is not None else None,
+                return_record.id if return_record is not None else None,
+            )
+            if (
+                existing.order_id != order.id
+                or existing.payment_id != payment.id
+                or existing.amount != amount
+                or existing.reason != serializer.validated_data['reason']
+                or existing_targets != requested_targets
+            ):
                 raise serializers.ValidationError(
                     'Idempotency key đã được sử dụng cho yêu cầu khác.',
                 )
@@ -1043,6 +1276,13 @@ class RefundCreateView(APIView):
                 'amount': str(existing.amount),
                 'status': existing.status,
             })
+
+        if payment.status != 'PAID':
+            raise serializers.ValidationError(
+                'Chỉ khoản thanh toán đã thành công mới được yêu cầu hoàn tiền.',
+            )
+        if amount > payment.amount:
+            raise serializers.ValidationError('Số tiền hoàn vượt quá số tiền đã thanh toán.')
         previous_refunds = Refund.objects.filter(
             payment=payment,
             status__in=('REQUESTED', 'APPROVED', 'COMPLETED'),

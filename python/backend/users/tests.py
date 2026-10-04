@@ -3,17 +3,19 @@ import re
 from contextlib import nullcontext
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.http import Http404
 from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .admin_api_views import (
+    AdminUserListView,
     UserAccountStatusSerializer,
     UserViolationInputSerializer,
     UserViolationStatusSerializer,
@@ -28,6 +30,68 @@ from .models import OtpVerification, User, UserAddress
 from .otp_api_views import OtpVerifySerializer, OtpVerifyView
 from .permissions import IsAdmin
 from .tokens import is_token_revoked, revoke_token
+
+
+class AdminUserListApiTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def test_admin_user_list_is_paginated_and_excludes_password_hash(self):
+        admin = SimpleNamespace(id=1, is_authenticated=True, role='ADMIN')
+        user = User(
+            id=17,
+            email='student@example.invalid',
+            password_hash='never-return-this',
+            full_name='Synthetic Student',
+            phone=None,
+            role='STUDENT',
+            status='ACTIVE',
+            university=None,
+            created_at=timezone.now(),
+        )
+        queryset = Mock()
+        queryset.select_related.return_value = queryset
+        queryset.order_by.return_value = queryset
+        queryset.filter.return_value = queryset
+        paginator = Mock()
+        paginator.paginate_queryset.return_value = [user]
+        paginator.get_paginated_response.side_effect = lambda data: Response(data)
+        request = self.factory.get(
+            '/api/admin/users/',
+            {'search': 'student', 'status': 'ACTIVE', 'role': 'STUDENT'},
+        )
+        force_authenticate(request, user=admin)
+
+        with patch.object(
+            User.objects,
+            'select_related',
+            return_value=queryset,
+        ), patch(
+            'users.admin_api_views.BookPagination',
+            return_value=paginator,
+        ):
+            response = AdminUserListView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]['id'], 17)
+        self.assertEqual(response.data[0]['email'], 'student@example.invalid')
+        self.assertNotIn('password_hash', response.data[0])
+        queryset.filter.assert_any_call(status='ACTIVE')
+        queryset.filter.assert_any_call(role='STUDENT')
+        paginator.paginate_queryset.assert_called_once()
+
+    def test_nonadmin_cannot_list_users(self):
+        request = self.factory.get('/api/admin/users/')
+        force_authenticate(
+            request,
+            user=SimpleNamespace(id=2, is_authenticated=True, role='STUDENT'),
+        )
+
+        with patch.object(User.objects, 'select_related') as select_related:
+            response = AdminUserListView.as_view()(request)
+
+        self.assertEqual(response.status_code, 403)
+        select_related.assert_not_called()
 
 
 class _OtpQuery:

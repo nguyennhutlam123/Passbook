@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yêu cầu sách - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell" data-requests-page>
+        <section class="section-heading">
+            <div><span class="eyebrow">Cộng đồng</span><h1>Yêu cầu sách</h1></div>
+            <button class="button button-outline" type="button" data-request-refresh>Tải lại</button>
+        </section>
+        <form class="workspace-checkout" data-request-form>
+            <h2>Tạo yêu cầu / đăng nhu cầu bán</h2>
+            <label class="form-label" for="request-type">Loại yêu cầu</label>
+            <select class="form-control" id="request-type" name="request_type">
+                <option value="BUY">Tìm mua</option>
+                <option value="BORROW">Tìm mượn</option>
+                <option value="SELL_INTENT">Muốn bán</option>
+            </select>
+            <label class="form-label" for="request-title">Từ khóa tiêu đề</label>
+            <input class="form-control" id="request-title" name="title_keyword" maxlength="500" required>
+            <label class="form-label" for="request-description">Mô tả</label>
+            <textarea class="form-control" id="request-description" name="description"></textarea>
+            <label class="form-label" for="request-price">Ngân sách tối đa / giá muốn bán (VND)</label>
+            <input class="form-control" id="request-price" name="price" type="number" min="0" step="1">
+            <button class="button button-primary" type="submit">Đăng yêu cầu</button>
+            <button class="button button-outline" type="button" data-request-edit-cancel hidden>Hủy sửa</button>
+            <p class="form-error" role="alert" data-request-error></p>
+        </form>
+        <section class="workspace-section">
+            <h2>Yêu cầu đang mở</h2>
+            <div class="report-list" data-request-list><p class="loading-state">Đang tải yêu cầu...</p></div>
+            <div data-request-pagination></div>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/components/commerce/cards.js"></script>
+    <script src="js/components/messaging/cards.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/orders-api.js"></script>
+    <script src="js/api/payments-api.js"></script>
+    <script src="js/api/shipping-api.js"></script>
+    <script src="js/api/returns-api.js"></script>
+    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
+    <script src="js/api/admin-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/requests.js"></script>
+</body>
+</html>

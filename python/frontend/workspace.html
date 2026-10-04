@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giao dịch của tôi - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell workspace-page" data-workspace-page>
+        <section class="section-heading">
+            <div>
+                <span class="eyebrow">Tài khoản</span>
+                <h1>Giao dịch của tôi</h1>
+            </div>
+            <button class="button button-outline" type="button" data-workspace-refresh>Tải lại</button>
+        </section>
+        <section class="workspace-section" aria-labelledby="cart-title">
+            <h2 id="cart-title">Giỏ hàng</h2>
+            <div class="report-list" data-cart-items><p class="loading-state">Đang tải giỏ hàng...</p></div>
+            <p class="workspace-total" data-cart-total></p>
+            <form class="workspace-checkout" data-checkout-form>
+                <h3>Địa chỉ giao hàng</h3>
+                <div class="form-group">
+                    <label class="form-label" for="checkout-recipient">Người nhận</label>
+                    <input class="form-control" id="checkout-recipient" name="recipient_name" required maxlength="255">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="checkout-phone">Số điện thoại</label>
+                    <input class="form-control" id="checkout-phone" name="phone" required maxlength="30">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="checkout-address">Địa chỉ</label>
+                    <input class="form-control" id="checkout-address" name="address_line" required maxlength="500">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="checkout-city">Tỉnh / thành phố</label>
+                    <input class="form-control" id="checkout-city" name="city" required maxlength="255">
+                </div>
+                <button class="button button-primary" type="submit">Thanh toán / tạo đơn</button>
+            </form>
+            <p class="form-error" role="alert" data-cart-error></p>
+        </section>
+        <section class="workspace-section" aria-labelledby="orders-title">
+            <div class="section-heading">
+                <h2 id="orders-title">Đơn hàng</h2>
+                <button class="button button-outline" type="button" data-orders-refresh>Cập nhật đơn hàng</button>
+            </div>
+            <div class="report-list" data-orders-list><p class="loading-state">Đang tải đơn hàng...</p></div>
+        </section>
+        <section class="workspace-section" aria-labelledby="reservations-title">
+            <div class="section-heading">
+                <h2 id="reservations-title">Yêu cầu đặt giữ</h2>
+                <button class="button button-outline" type="button" data-reservations-refresh>Cập nhật</button>
+            </div>
+            <div class="report-list" data-reservations-list><p class="loading-state">Đang tải yêu cầu...</p></div>
+        </section>
+        <section class="workspace-section" aria-labelledby="borrow-title">
+            <div class="section-heading">
+                <h2 id="borrow-title">Giao dịch mượn sách</h2>
+                <button class="button button-outline" type="button" data-borrows-refresh>Cập nhật</button>
+            </div>
+            <div class="report-list" data-borrows-list><p class="loading-state">Đang tải giao dịch...</p></div>
+        </section>
+        <p class="form-error" role="alert" data-workspace-error></p>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/components/commerce/cards.js"></script>
+    <script src="js/components/messaging/cards.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/orders-api.js"></script>
+    <script src="js/api/payments-api.js"></script>
+    <script src="js/api/shipping-api.js"></script>
+    <script src="js/api/returns-api.js"></script>
+    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
+    <script src="js/api/admin-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/workspace.js"></script>
+</body>
+</html>

@@ -39,9 +39,10 @@ from .commerce_api_views import (
     ReturnActionView,
     BorrowCheckoutInputSerializer,
     CheckoutInputSerializer,
+    lend_listing_payload,
 )
 from .api_views import BookDetailView
-from .request_api_views import BookRequestDetailView
+from .request_api_views import BookIntentSummaryView, BookRequestDetailView
 from users.models import OtpVerification
 
 
@@ -276,12 +277,123 @@ class BookListPayloadTests(SimpleTestCase):
                 'condition_status',
                 'condition_label',
                 'publication_year',
+                'edition',
                 'primary_image',
                 'subject',
                 'category',
                 'seller',
+                'buying_intent_count',
+                'selling_intent_count',
             },
         )
+        self.assertEqual(
+            BookListSerializer().fields['edition'].source,
+            'book_edition.edition_name',
+        )
+
+
+class BookIntentEndpointTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def test_intent_summary_is_public_and_returns_aggregates(self):
+        request = self.factory.get('/api/books/12/intents/')
+        with patch('books.request_api_views.get_object_or_404', return_value=object()), patch(
+            'books.request_api_views.intent_summary',
+            return_value={
+                'buying_count': 3,
+                'selling_count': 1,
+                'my_buy_request_id': None,
+                'my_sell_intent_request_id': None,
+            },
+        ):
+            response = BookIntentSummaryView.as_view()(request, book_id=12)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['buying_count'], 3)
+        self.assertNotIn('users', response.data)
+
+    def test_intent_changes_require_authentication(self):
+        request = self.factory.post(
+            '/api/books/12/intents/',
+            {'request_type': 'BUY'},
+            format='json',
+        )
+        response = BookIntentSummaryView.as_view()(request, book_id=12)
+        self.assertEqual(response.status_code, 401)
+
+    def test_intent_changes_reject_unsupported_types(self):
+        request = self.factory.post(
+            '/api/books/12/intents/',
+            {'request_type': 'FAVORITE'},
+            format='json',
+        )
+        user = SimpleNamespace(id=5, is_authenticated=True)
+        force_authenticate(request, user=user)
+        response = BookIntentSummaryView.as_view()(request, book_id=12)
+        self.assertEqual(response.status_code, 400)
+
+
+class LendListingPayloadTests(SimpleTestCase):
+    def test_catalog_payload_contains_book_context_and_primary_image(self):
+        subject = SimpleNamespace(id=5, name='Physics', code='PHY101')
+        category = SimpleNamespace(name='Textbooks')
+        image = SimpleNamespace(
+            id=8,
+            image_url='https://images.example.invalid/book.jpg',
+            is_primary=True,
+        )
+        work = SimpleNamespace(
+            id=44,
+            author_name='A. Author',
+            category_id=9,
+            category=category,
+            primary_subject_links=[SimpleNamespace(subject=subject)],
+        )
+        edition = SimpleNamespace(
+            book_work=work,
+            edition_name='Second edition',
+            edition_number=2,
+            publication_year=2024,
+            publisher_name='Example Press',
+            language=SimpleNamespace(id=1, name='English', code='en'),
+        )
+        book = SimpleNamespace(
+            id=12,
+            book_edition=edition,
+            condition_status='good',
+            condition_label='GOOD',
+            condition_description='Lightly used',
+            catalog_images=[image],
+        )
+        listing = SimpleNamespace(
+            id=17,
+            book_id=12,
+            lender_id=3,
+            lender=SimpleNamespace(
+                full_name='Lender',
+                university_id=6,
+                university=SimpleNamespace(name='Example University'),
+            ),
+            book=book,
+            title='Borrowable textbook',
+            description='Borrow details',
+            status='ACTIVE',
+            deposit_amount=None,
+            rental_fee=Decimal('25000.0000'),
+            currency='VND',
+            created_at=timezone.now(),
+            buying_intent_count=4,
+            selling_intent_count=1,
+        )
+        payload = lend_listing_payload(listing)
+        self.assertEqual(payload['primary_image'], image.image_url)
+        self.assertEqual(payload['condition_status'], 'good')
+        self.assertEqual(payload['subject']['code'], 'PHY101')
+        self.assertEqual(
+            payload['book']['seller']['university']['name'],
+            'Example University',
+        )
+        self.assertEqual(payload['buying_intent_count'], 4)
 
 
 class AdminCoverageTests(SimpleTestCase):
@@ -830,6 +942,64 @@ class PaymentInputSecurityTests(SimpleTestCase):
                     refund_request,
                     order_id=31,
                 )
+        create_refund.assert_not_called()
+
+    def test_refund_retry_returns_existing_refund_after_payment_is_refunded(self):
+        from decimal import Decimal
+
+        order = SimpleNamespace(id=31, buyer_id=10)
+        payment = SimpleNamespace(id=80, provider='fake', status='REFUNDED')
+        refund = SimpleNamespace(
+            id=22,
+            order_id=31,
+            payment_id=80,
+            amount=Decimal('170000.0000'),
+            reason='Acceptance workflow test',
+            sale_order_item_id=91,
+            borrow_order_id=None,
+            return_record_id=22,
+            status='COMPLETED',
+        )
+        return_record = SimpleNamespace(
+            id=22,
+            sale_order_item_id=91,
+            status='COMPLETED',
+            sale_order_item=SimpleNamespace(id=91),
+        )
+        request = SimpleNamespace(
+            user=SimpleNamespace(id=10, is_authenticated=True),
+            data={
+                'payment_id': 80,
+                'return_id': 22,
+                'idempotency_key': 'acceptance-refund-order-113-v1',
+                'reason': 'Acceptance workflow test',
+                'amount': '170000.0000',
+            },
+        )
+        refund_query = Mock()
+        refund_query.filter.return_value.first.return_value = refund
+
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            side_effect=(order, payment, return_record),
+        ), patch(
+            'books.commerce_api_views.Refund.objects.select_for_update',
+            return_value=refund_query,
+        ), patch(
+            'books.commerce_api_views.Refund.objects.filter',
+        ) as create_path_query, patch(
+            'books.commerce_api_views.Refund.objects.create',
+        ) as create_refund:
+            response = RefundCreateView.post.__wrapped__(
+                RefundCreateView(),
+                request,
+                order_id=31,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], 22)
+        self.assertEqual(response.data['status'], 'COMPLETED')
+        create_path_query.assert_not_called()
         create_refund.assert_not_called()
 
     def test_nonparticipant_cannot_read_order_details(self):

@@ -5,6 +5,7 @@
 -- No database name, database creation, seed data, migration, or DROP statements.
 -- Application validation must enforce polymorphic target exclusivity and cross-FK consistency.
 -- CHECK constraints touching FK columns are omitted because MySQL restricts referential-action columns in CHECK expressions.
+-- Cascading FK actions are omitted when their child column feeds a generated key for MySQL compatibility.
 -- Amounts use VND DECIMAL(19,4); fee rates are ratios from 0 through 1.
 SET NAMES utf8mb4;
 
@@ -114,7 +115,7 @@ CREATE TABLE `user_addresses` (
   CONSTRAINT `uq_user_addresses_1` UNIQUE (`default_address_user_key`),
   KEY `ix_user_addresses_1` (`user_id`, `is_default`),
   CONSTRAINT `ck_user_addresses_1` CHECK (`is_default` IN (0,1)),
-  CONSTRAINT `fk_user_addresses_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `fk_user_addresses_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `user_violations` (
@@ -208,7 +209,7 @@ CREATE TABLE `book_work_subjects` (
   CONSTRAINT `uq_book_work_subjects_1` UNIQUE (`primary_subject_work_key`),
   KEY `ix_book_work_subjects_1` (`subject_id`, `book_work_id`),
   CONSTRAINT `ck_book_work_subjects_1` CHECK (`is_primary` IN (0,1)),
-  CONSTRAINT `fk_book_work_subjects_1` FOREIGN KEY (`book_work_id`) REFERENCES `book_works` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_book_work_subjects_1` FOREIGN KEY (`book_work_id`) REFERENCES `book_works` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_book_work_subjects_2` FOREIGN KEY (`subject_id`) REFERENCES `subjects` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -282,7 +283,7 @@ CREATE TABLE `book_images` (
   KEY `ix_book_images_1` (`book_id`, `is_primary`, `sort_order`),
   CONSTRAINT `ck_book_images_1` CHECK (`sort_order` >= 0),
   CONSTRAINT `ck_book_images_2` CHECK (`is_primary` IN (0,1)),
-  CONSTRAINT `fk_book_images_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT `fk_book_images_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `sale_listings` (
@@ -309,7 +310,7 @@ CREATE TABLE `sale_listings` (
   CONSTRAINT `ck_sale_listings_2` CHECK (`currency` = 'VND'),
   CONSTRAINT `ck_sale_listings_3` CHECK (`status` IN ('DRAFT','PENDING','ACTIVE','REJECTED','RESERVED','SOLD','CLOSED','EXPIRED')),
   CONSTRAINT `ck_sale_listings_4` CHECK (`expires_at` IS NULL OR `published_at` IS NULL OR `expires_at` > `published_at`),
-  CONSTRAINT `fk_sale_listings_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_sale_listings_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_sale_listings_2` FOREIGN KEY (`seller_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -338,7 +339,7 @@ CREATE TABLE `lend_listings` (
   CONSTRAINT `ck_lend_listings_2` CHECK (`deposit_amount` IS NULL OR `deposit_amount` >= 0),
   CONSTRAINT `ck_lend_listings_3` CHECK (`currency` = 'VND'),
   CONSTRAINT `ck_lend_listings_4` CHECK (`status` IN ('DRAFT','ACTIVE','RESERVED','ON_LOAN','CLOSED','EXPIRED')),
-  CONSTRAINT `fk_lend_listings_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_lend_listings_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_lend_listings_2` FOREIGN KEY (`lender_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -439,7 +440,7 @@ CREATE TABLE `carts` (
   CONSTRAINT `uq_carts_1` UNIQUE (`active_cart_user_key`),
   KEY `ix_carts_1` (`user_id`, `status`, `updated_at`),
   CONSTRAINT `ck_carts_1` CHECK (`status` IN ('ACTIVE','CHECKED_OUT','ABANDONED')),
-  CONSTRAINT `fk_carts_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `fk_carts_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `cart_items` (
@@ -528,7 +529,7 @@ CREATE TABLE `orders` (
   CONSTRAINT `ck_orders_amounts` CHECK (`subtotal` >= 0 AND `shipping_fee` >= 0 AND `discount_amount` >= 0 AND `total_amount` >= 0),
   CONSTRAINT `fk_orders_1` FOREIGN KEY (`checkout_group_id`) REFERENCES `checkout_groups` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_orders_2` FOREIGN KEY (`buyer_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_orders_3` FOREIGN KEY (`seller_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `fk_orders_3` FOREIGN KEY (`seller_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `sale_order_items` (
@@ -885,7 +886,7 @@ CREATE TABLE `book_reservations` (
   KEY `ix_book_reservations_expiry` (`status`, `expires_at`),
   CONSTRAINT `ck_book_reservations_status` CHECK (`status` IN ('PENDING','CONFIRMED','CANCELLED','EXPIRED','COMPLETED','REJECTED')),
   CONSTRAINT `ck_book_reservations_expiry` CHECK (`expires_at` > `created_at`),
-  CONSTRAINT `fk_book_reservations_book` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_book_reservations_book` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_book_reservations_requester` FOREIGN KEY (`requester_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_book_reservations_owner` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

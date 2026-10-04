@@ -129,7 +129,11 @@ class OtpRequestView(APIView):
             user=user,
         )
         return Response(
-            {'detail': 'Nếu yêu cầu hợp lệ, mã xác minh sẽ được gửi.'},
+            {
+                'detail': 'Nếu yêu cầu hợp lệ, mã xác minh sẽ được gửi.',
+                'otp_expires_in_seconds': settings.OTP_LIFETIME_SECONDS,
+                'otp_resend_after_seconds': settings.OTP_RESEND_COOLDOWN_SECONDS,
+            },
             status=status.HTTP_202_ACCEPTED,
         )
 
@@ -232,7 +236,11 @@ class ForgotPasswordView(APIView):
             user=user,
         )
         return Response(
-            {'detail': 'Nếu tài khoản tồn tại, mã xác minh sẽ được gửi.'},
+            {
+                'detail': 'Nếu tài khoản tồn tại, mã xác minh sẽ được gửi.',
+                'otp_expires_in_seconds': settings.OTP_LIFETIME_SECONDS,
+                'otp_resend_after_seconds': settings.OTP_RESEND_COOLDOWN_SECONDS,
+            },
             status=status.HTTP_202_ACCEPTED,
         )
 

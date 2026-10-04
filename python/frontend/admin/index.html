@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản trị - PassBook</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell" data-admin-dashboard>
+        <section class="page-heading">
+            <span class="eyebrow">PassBook</span>
+            <h1>Bảng điều khiển quản trị</h1>
+            <p>Theo dõi hoạt động và xử lý báo cáo từ cộng đồng.</p>
+            <nav class="admin-nav"><a href="index.html">Tổng quan</a><a href="reports.html">Báo cáo</a><a href="users.html">Tài khoản</a></nav>
+        </section>
+        <section aria-labelledby="admin-metrics-title">
+            <h2 id="admin-metrics-title">Tổng quan</h2>
+            <div class="book-grid" data-admin-metrics><p class="loading-state">Đang tải thống kê...</p></div>
+        </section>
+        <section class="workspace-section" data-payment-simulator>
+            <h2>Payment simulator (local/test only)</h2>
+            <p class="caption">Dùng ID thanh toán/hoàn tiền lấy từ giao dịch; backend vẫn kiểm tra quyền quản trị và cờ fake provider.</p>
+            <form data-fake-payment-form>
+                <label class="form-label" for="fake-payment-id">Payment ID</label>
+                <input class="form-control" id="fake-payment-id" name="payment_id" type="number" min="1" required>
+                <label class="form-label" for="fake-payment-status">Trạng thái</label>
+                <select class="form-control" id="fake-payment-status" name="status">
+                    <option value="PAID">Thành công</option><option value="FAILED">Thất bại</option>
+                    <option value="CANCELLED">Hủy</option><option value="PENDING">Đặt lại pending</option>
+                </select>
+                <button class="button button-outline" type="submit">Chuyển trạng thái thanh toán</button>
+            </form>
+            <form data-fake-refund-form>
+                <label class="form-label" for="fake-refund-id">Refund ID</label>
+                <input class="form-control" id="fake-refund-id" name="refund_id" type="number" min="1" required>
+                <label class="form-label" for="fake-refund-status">Trạng thái</label>
+                <select class="form-control" id="fake-refund-status" name="status">
+                    <option value="COMPLETED">Hoàn tất</option><option value="FAILED">Thất bại</option>
+                </select>
+                <button class="button button-outline" type="submit">Chuyển trạng thái hoàn tiền</button>
+            </form>
+            <p class="form-error" role="alert" data-fake-payment-error></p>
+        </section>
+        <section aria-labelledby="admin-reports-title">
+            <div class="section-heading">
+                <div><span class="eyebrow">Moderation</span><h2 id="admin-reports-title">Báo cáo gần đây</h2></div>
+                <label class="form-label" for="admin-report-filter">Trạng thái</label>
+                <select id="admin-report-filter" class="form-control" data-report-filter>
+                    <option value="">Tất cả</option><option value="OPEN">Mới</option>
+                    <option value="IN_REVIEW">Đang xem xét</option><option value="RESOLVED">Đã xử lý</option>
+                    <option value="REJECTED">Từ chối</option>
+                </select>
+            </div>
+            <div class="report-list" data-admin-reports><p class="loading-state">Đang tải báo cáo...</p></div>
+        </section>
+        <p class="form-error" role="alert" data-admin-error></p>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="../js/core/storage.js"></script><script src="../js/core/errors.js"></script>
+    <script src="../js/core/auth.js"></script><script src="../js/core/router.js"></script>
+    <script src="../js/core/guards.js"></script>
+    <script src="../js/components/common/common.js"></script><script src="../js/components/books/book-card.js"></script>
+    <script src="../js/components/commerce/cards.js"></script><script src="../js/components/messaging/cards.js"></script>
+    <script src="../js/api.js"></script><script src="../js/api/utils.js"></script>
+    <script src="../js/api/auth-api.js"></script><script src="../js/api/users-api.js"></script>
+    <script src="../js/api/books-api.js"></script><script src="../js/api/favorites-api.js"></script>
+    <script src="../js/api/reservations-api.js"></script><script src="../js/api/orders-api.js"></script>
+    <script src="../js/api/payments-api.js"></script><script src="../js/api/shipping-api.js"></script>
+    <script src="../js/api/returns-api.js"></script><script src="../js/api/messaging-api.js"></script>
+    <script src="../js/api/notifications-api.js"></script><script src="../js/api/reports-api.js"></script>
+    <script src="../js/api/admin-api.js"></script><script src="../js/main.js"></script>
+    <script src="../js/admin-payment-simulator.js"></script>
+    <script src="../js/admin.js"></script>
+</body>
+</html>

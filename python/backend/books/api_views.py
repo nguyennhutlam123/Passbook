@@ -1,7 +1,8 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Prefetch, Q, Subquery
+from django.db.models import Count, Exists, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -14,6 +15,7 @@ from .models import (
     Book,
     BookIdentifier,
     BookImage,
+    BookRequest,
     BookWorkSubject,
     Favorite,
     SaleListing,
@@ -76,6 +78,8 @@ def optimized_books_queryset(
             'owner__id',
             'owner__full_name',
             'owner__university_id',
+            'owner__university__id',
+            'owner__university__name',
             'book_edition__id',
             'book_edition__edition_name',
             'book_edition__publication_year',
@@ -88,7 +92,38 @@ def optimized_books_queryset(
         )
         selected_relations = (
             'owner',
+            'owner__university',
             'book_edition__book_work__category',
+        )
+        intent_requests = BookRequest.objects.filter(
+            book_work_id=OuterRef('book_edition__book_work_id'),
+            status='OPEN',
+        ).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+        )
+        queryset = queryset.annotate(
+            buying_intent_count=Coalesce(
+                Subquery(
+                    intent_requests.filter(request_type='BUY')
+                    .order_by()
+                    .values('book_work_id')
+                    .annotate(total=Count('user_id', distinct=True))
+                    .values('total')[:1],
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            ),
+            selling_intent_count=Coalesce(
+                Subquery(
+                    intent_requests.filter(request_type='SELL_INTENT')
+                    .order_by()
+                    .values('book_work_id')
+                    .annotate(total=Count('user_id', distinct=True))
+                    .values('total')[:1],
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            ),
         )
     else:
         subject_links = BookWorkSubject.objects.filter(
@@ -98,28 +133,31 @@ def optimized_books_queryset(
         selected_relations = (
             'owner',
             'owner__university',
+            'book_edition__language',
+            'book_edition__book_work',
             'book_edition__book_work__category',
         )
-    return (
-        queryset
-        .select_related(*selected_relations)
-        .prefetch_related(
+    prefetches = [
+        Prefetch('images', queryset=images),
+        Prefetch(
+            'sale_listings',
+            queryset=listings,
+            to_attr='active_sale_listings',
+        ),
+        Prefetch(
+            'book_edition__book_work__subject_links',
+            queryset=subject_links,
+            to_attr='primary_subject_links',
+        ),
+    ]
+    if not list_payload:
+        prefetches.append(
             Prefetch(
-                'images',
-                queryset=images,
-            ),
-            Prefetch(
-                'sale_listings',
-                queryset=listings,
-                to_attr='active_sale_listings',
-            ),
-            Prefetch(
-                'book_edition__book_work__subject_links',
-                queryset=subject_links,
-                to_attr='primary_subject_links',
+                'book_edition__identifiers',
+                queryset=BookIdentifier.objects.order_by('identifier_type', 'id'),
             ),
         )
-    )
+    return queryset.select_related(*selected_relations).prefetch_related(*prefetches)
 
 
 def _with_search(queryset, search):
@@ -202,6 +240,30 @@ class BookListView(APIView):
         university_id = self._filter_integer(query_params, 'university_id')
         if university_id is not None:
             queryset = queryset.filter(owner__university_id=university_id)
+        faculty_id = self._filter_integer(query_params, 'faculty_id')
+        if faculty_id is not None:
+            queryset = queryset.filter(owner__faculty_id=faculty_id)
+        major_id = self._filter_integer(query_params, 'major_id')
+        if major_id is not None:
+            queryset = queryset.filter(owner__major_id=major_id)
+        author = (query_params.get('author') or '').strip()
+        if author:
+            queryset = queryset.filter(
+                book_edition__book_work__author_name__icontains=author,
+            )
+        subject_code = (query_params.get('subject_code') or '').strip()
+        if subject_code:
+            queryset = queryset.filter(Exists(BookWorkSubject.objects.filter(
+                book_work_id=OuterRef('book_edition__book_work_id'),
+                subject__code__icontains=subject_code,
+            )))
+        isbn = (query_params.get('isbn') or '').strip()
+        if isbn:
+            queryset = queryset.filter(Exists(BookIdentifier.objects.filter(
+                book_edition_id=OuterRef('book_edition_id'),
+                identifier_type__iexact='ISBN',
+                identifier_value__icontains=isbn,
+            )))
         if query_params.get('pickup_location_id') not in (None, ''):
             raise serializers.ValidationError({
                 'pickup_location_id': 'Điểm nhận riêng không thuộc schema Lite; trường lọc này đã ngừng hỗ trợ.',

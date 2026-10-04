@@ -512,11 +512,27 @@ h2 {
 }
 
 .notification-button {
+    position: relative;
     background: transparent;
     border: 0;
     cursor: pointer;
     font-size: 1.2rem;
     padding: 0.5rem;
+}
+
+.notification-button [data-notification-count]:not([hidden]) {
+    align-items: center;
+    background: var(--danger-color, #c2413b);
+    border-radius: 999px;
+    color: #fff;
+    display: inline-flex;
+    font-size: 0.65rem;
+    height: 1rem;
+    justify-content: center;
+    min-width: 1rem;
+    position: absolute;
+    right: 0;
+    top: 0;
 }
 
 .nav-actions {
@@ -531,11 +547,38 @@ h2 {
     box-shadow: var(--shadow-md);
     max-width: min(22rem, 90vw);
     min-width: 18rem;
+    max-height: min(70vh, 32rem);
+    overflow-y: auto;
     padding: 0.5rem;
     position: absolute;
     right: 7rem;
     top: 3rem;
     z-index: 10;
+}
+
+.notification-view-all,
+.notification-mark-all {
+    display: block;
+    margin-top: 0.5rem;
+    padding: 0.65rem;
+    text-align: center;
+    width: 100%;
+}
+
+.notification-mark-all {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    color: var(--text-color);
+    cursor: pointer;
+}
+
+.component-pagination,
+.admin-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 1rem 0;
 }
 
 .notification-item,

@@ -24,9 +24,11 @@
                     <h2>Mô tả</h2>
                     <p data-detail-description></p>
                 </div>
+                <section class="detail-intents" data-detail-intents aria-label="Dự định mua và bán">
+                    <p class="loading-state">Đang tải số người quan tâm...</p>
+                </section>
                 <div class="seller-panel" data-detail-seller></div>
                 <div class="detail-location">
-                    <p><strong>Địa điểm giao nhận:</strong> <span data-detail-location></span></p>
                     <p><strong>Thời gian giao nhận:</strong> Linh hoạt theo lịch học</p>
                 </div>
                 <div class="detail-actions" data-detail-actions></div>
@@ -34,7 +36,30 @@
         </div>
     </main>
     <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/components/commerce/cards.js"></script>
+    <script src="js/components/messaging/cards.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/orders-api.js"></script>
+    <script src="js/api/payments-api.js"></script>
+    <script src="js/api/shipping-api.js"></script>
+    <script src="js/api/returns-api.js"></script>
+    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
+    <script src="js/api/admin-api.js"></script>
     <script src="js/main.js"></script>
     <script src="js/book-detail.js"></script>
 </body>

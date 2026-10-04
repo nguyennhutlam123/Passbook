@@ -1,15 +1,17 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from books.pagination import BookPagination
 from django.http import Http404
 from django.test import SimpleTestCase
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from .api_views import ConversationDetailView, MessageListView
 from .models import Conversation, ConversationMember
-from .serializers import MessageSerializer
+from .serializers import ConversationSerializer, MessageSerializer
 
 
 class MessagePaginationTests(SimpleTestCase):
@@ -120,3 +122,30 @@ class ConversationAuthorizationTests(SimpleTestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertEqual(serializer.validated_data, {'content': 'hello'})
+
+
+class ConversationSerializationTests(SimpleTestCase):
+    def test_conversation_with_missing_book_context_serializes_as_null(self):
+        now = timezone.now()
+        conversation = Conversation(
+            id=4,
+            conversation_type='SALE',
+            created_at=now,
+            updated_at=now,
+        )
+        conversation._prefetched_objects_cache = {
+            'members': [
+                SimpleNamespace(
+                    user=SimpleNamespace(id=1, full_name='Buyer'),
+                ),
+                SimpleNamespace(
+                    user=SimpleNamespace(id=2, full_name='Seller'),
+                ),
+            ],
+        }
+
+        payload = ConversationSerializer(conversation).data
+
+        self.assertIsNone(payload['book'])
+        self.assertEqual(payload['buyer']['name'], 'Buyer')
+        self.assertEqual(payload['seller']['name'], 'Seller')

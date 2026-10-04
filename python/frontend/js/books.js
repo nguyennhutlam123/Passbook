@@ -1,11 +1,9 @@
 const catalogFilters = [
     ["#catalog-query", "search", "q"],
-    ["#filter-listing-type", "listing_type"],
-    ["#filter-school", "university_id"],
-    ["#filter-faculty", "faculty_id"],
-    ["#filter-major", "major_id"],
-    ["#filter-subject", "subject_id"],
-    ["#filter-subject-code", "subject_code"],
+    ["#filter-school", "university"],
+    ["#filter-faculty", "faculty"],
+    ["#filter-major", "major"],
+    ["#filter-subject", "subject"],
     ["#filter-author", "author"],
     ["#filter-isbn", "isbn"],
     ["#filter-edition", "edition"],
@@ -17,9 +15,26 @@ const catalogFilters = [
     ["#sort-books", "sort"],
 ];
 let catalogRequestId = 0;
+let borrowCatalog = false;
+const catalogPage = () => borrowCatalog ? "borrow.html" : "books.html";
 
 function renderApiBookCard(book) {
     return renderBookCard(book);
+}
+
+function bindBorrowButtons(root) {
+    root.querySelectorAll("[data-borrow-request]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!PassbookGuards.requireAuth()) return;
+            openBorrowReservationDialog({
+                bookId: button.dataset.bookId,
+                listingId: button.dataset.borrowRequest,
+                title: button.dataset.title,
+            });
+        });
+    });
 }
 
 function currentCatalogParams(page) {
@@ -43,29 +58,18 @@ function syncCatalogUrl(page) {
     if (condition) params.set("condition_status", condition);
     if (page > 1) params.set("page", String(page));
     const query = params.toString();
-    history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}`);
+    history.replaceState(null, "", `${catalogPage()}${query ? `?${query}` : ""}`);
 }
 
 function populateOptions(select, rows, label) {
-    const selected = select.value;
     select.replaceChildren(new Option(label, ""));
     for (const option of rows || []) {
         select.add(new Option(option.name, String(option.id)));
-    }
-    if (selected && Array.from(select.options).some((option) => option.value === selected)) {
-        select.value = selected;
     }
 }
 
 async function loadCatalogOptions() {
     const options = await BooksAPI.options();
-    const school = document.querySelector("#filter-school");
-    const faculty = document.querySelector("#filter-faculty");
-    const major = document.querySelector("#filter-major");
-    populateOptions(school, options.universities, "Tất cả trường");
-    populateOptions(faculty, options.faculties, "Tất cả khoa");
-    populateOptions(major, options.majors, "Tất cả ngành");
-    populateOptions(document.querySelector("#filter-subject"), options.subjects, "Tất cả môn học");
     populateOptions(document.querySelector("#filter-category"), options.categories, "Tất cả danh mục");
     populateOptions(document.querySelector("#filter-language"), options.languages, "Tất cả ngôn ngữ");
     const urlParams = new URLSearchParams(location.search);
@@ -74,61 +78,6 @@ async function loadCatalogOptions() {
         const value = urlParams.get(urlKey);
         if (field && value) field.value = key === "sort" ? value.replace("_", "-") : value;
     }
-
-    const applyParentFilters = () => {
-        const universityId = school.value;
-        const facultyId = faculty.value;
-        populateOptions(
-            faculty,
-            options.faculties.filter((item) => !universityId || String(item.university_id) === universityId),
-            "Tất cả khoa",
-        );
-        if (facultyId && Array.from(faculty.options).some((item) => item.value === facultyId)) {
-            faculty.value = facultyId;
-        }
-        populateOptions(
-            major,
-            options.majors.filter((item) => !faculty.value || String(item.faculty_id) === faculty.value),
-            "Tất cả ngành",
-        );
-    };
-    faculty.disabled = false;
-    major.disabled = false;
-    school.addEventListener("change", () => {
-        faculty.value = "";
-        major.value = "";
-        applyParentFilters();
-        void loadBooks(1);
-    });
-    faculty.addEventListener("change", () => {
-        major.value = "";
-        applyParentFilters();
-        void loadBooks(1);
-    });
-    applyParentFilters();
-}
-
-function normalizeLendListing(listing) {
-    return {
-        id: listing.book_id,
-        listing_id: listing.id,
-        listing_type: "BORROW",
-        title: listing.title,
-        price: listing.rental_fee,
-        status: "available",
-        condition_status: listing.condition_status,
-        condition_label: listing.condition_label,
-        edition: listing.edition,
-        publication_year: listing.publication_year,
-        primary_image: listing.primary_image
-            ? {image_url: listing.primary_image}
-            : null,
-        subject: listing.subject,
-        category: listing.category,
-        seller: listing.seller,
-        buying_intent_count: listing.buying_intent_count,
-        selling_intent_count: listing.selling_intent_count,
-    };
 }
 
 async function loadBooks(page = 1) {
@@ -137,8 +86,6 @@ async function loadBooks(page = 1) {
     const empty = document.querySelector("[data-catalog-empty]");
     const error = document.querySelector("[data-filter-error]");
     const params = currentCatalogParams(page);
-    const listingType = params.listing_type || "SALE";
-    delete params.listing_type;
     const minPrice = Number(params.min_price);
     const maxPrice = Number(params.max_price);
     if (params.min_price && params.max_price && minPrice > maxPrice) {
@@ -149,7 +96,7 @@ async function loadBooks(page = 1) {
     syncCatalogUrl(page);
     grid.innerHTML = '<div class="loading-state" role="status">Đang tải giáo trình...</div>';
     try {
-        const data = listingType === "BORROW"
+        const data = borrowCatalog
             ? await BooksAPI.lendListings(params)
             : await BooksAPI.list(params);
         if (requestId !== catalogRequestId) return;
@@ -161,11 +108,23 @@ async function loadBooks(page = 1) {
             }
         }
         if (requestId !== catalogRequestId) return;
-        const books = listingType === "BORROW"
-            ? (data.results || []).map(normalizeLendListing)
-            : data.results || [];
+        const books = (data.results || []).map((listing) => borrowCatalog ? {
+            ...listing.book,
+            id: listing.book_id,
+            title: listing.title,
+            description: listing.description,
+            price: listing.rental_fee,
+            condition_status: listing.condition_status,
+            primary_image: listing.primary_image
+                ? {image_url: listing.primary_image}
+                : null,
+            seller: listing.seller,
+            listing_type: "BORROW",
+            listing_id: listing.id,
+        } : listing);
         grid.innerHTML = books.map(renderApiBookCard).join("");
         bindFavoriteButtons(grid);
+        if (borrowCatalog) bindBorrowButtons(grid);
         attachImageFallbacks(grid);
         grid.hidden = !books.length;
         empty.hidden = Boolean(books.length);
@@ -203,6 +162,7 @@ async function loadBooks(page = 1) {
 
 document.addEventListener("DOMContentLoaded", async () => {
     if (!document.querySelector("[data-catalog-grid]")) return;
+    borrowCatalog = Boolean(document.querySelector("[data-borrow-catalog]"));
     const params = new URLSearchParams(location.search);
     for (const [selector, key, urlKey = key] of catalogFilters) {
         const field = document.querySelector(selector);
@@ -220,20 +180,25 @@ document.addEventListener("DOMContentLoaded", async () => {
         field.addEventListener("change", () => void loadBooks(1)),
     );
     for (const selector of [
-        "#filter-listing-type", "#filter-subject", "#filter-major", "#filter-category", "#filter-language",
+        "#filter-category", "#filter-language",
         "#filter-year", "#sort-books", "#filter-min-price", "#filter-max-price",
     ]) {
         document.querySelector(selector)?.addEventListener("change", () => void loadBooks(1));
     }
     let debounce;
     for (const selector of [
-        "#catalog-query", "#filter-subject-code", "#filter-author", "#filter-isbn", "#filter-edition",
+        "#catalog-query", "#filter-school", "#filter-faculty", "#filter-major", "#filter-subject",
+        "#filter-author", "#filter-isbn", "#filter-edition",
     ]) {
         document.querySelector(selector)?.addEventListener("input", () => {
             window.clearTimeout(debounce);
             debounce = window.setTimeout(() => void loadBooks(1), 300);
         });
     }
+    document.querySelector("[data-apply-filters]")?.addEventListener("click", () => {
+        window.clearTimeout(debounce);
+        void loadBooks(1);
+    });
     document.querySelector("[data-search-submit]")?.addEventListener("click", () => void loadBooks(1));
     search?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
@@ -243,10 +208,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     });
     document.querySelector("[data-reset-filters]")?.addEventListener("click", () => {
-        window.location.assign("books.html");
+        window.location.assign(catalogPage());
     });
     document.querySelector("[data-reset-empty]")?.addEventListener("click", () => {
-        window.location.assign("books.html");
+        window.location.assign(catalogPage());
     });
     document.querySelector("[data-filter-open]")?.addEventListener("click", () =>
         document.querySelector(".filter-panel")?.classList.add("is-open"),

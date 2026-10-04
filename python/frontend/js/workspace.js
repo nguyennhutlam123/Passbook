@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const cartItems = page.querySelector("[data-cart-items]");
     const cartTotal = page.querySelector("[data-cart-total]");
     const checkoutForm = page.querySelector("[data-checkout-form]");
+    const checkoutSummary = page.querySelector("[data-checkout-summary]");
     const cartError = page.querySelector("[data-cart-error]");
     const ordersList = page.querySelector("[data-orders-list]");
     const reservationsList = page.querySelector("[data-reservations-list]");
@@ -14,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentUser = event.detail;
     });
     const checkoutKeyStorage = "passbook.checkout.idempotencyKey";
+    let selectedCartItemId = null;
     let orderPage = 1;
     let reservationPage = 1;
     let borrowPage = 1;
@@ -57,6 +59,32 @@ document.addEventListener("DOMContentLoaded", () => {
                     remove.disabled = false;
                 }
             },
+            onBuy: async (event) => {
+                const buy = event.currentTarget;
+                buy.disabled = true;
+                cartError.textContent = "";
+                try {
+                    const quote = await OrdersAPI.checkoutQuote({cart_item_id: item.id});
+                    selectedCartItemId = item.id;
+                    const lines = [
+                        `${quote.items[0]?.title || item.title} · ${money(quote.items[0]?.subtotal || 0)}`,
+                        `Tạm tính: ${money(quote.subtotal)}`,
+                        `Phí vận chuyển: ${money(quote.shipping_total)}`,
+                        `Tổng tiền: ${money(quote.total_amount)}`,
+                    ];
+                    checkoutSummary.replaceChildren(...lines.map((text) => {
+                        const row = document.createElement("p");
+                        row.textContent = text;
+                        return row;
+                    }));
+                    checkoutForm.hidden = false;
+                    checkoutForm.scrollIntoView({behavior: "smooth", block: "center"});
+                } catch (error) {
+                    cartError.textContent = error.message;
+                } finally {
+                    buy.disabled = false;
+                }
+            },
         });
     };
 
@@ -68,11 +96,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 setMessage(cartItems, "Giỏ hàng đang trống.");
                 cartTotal.textContent = "";
                 checkoutForm.hidden = true;
+                selectedCartItemId = null;
                 return;
             }
             cartItems.replaceChildren(...items.map(itemCard));
-            cartTotal.textContent = `Tổng cộng: ${money(items.reduce((sum, item) => sum + Number(item.unit_price), 0))}`;
-            checkoutForm.hidden = false;
+            cartTotal.textContent = `Tổng cộng: ${money(cart.total_amount)}`;
+            if (selectedCartItemId && !items.some((item) => item.id === selectedCartItemId)) {
+                selectedCartItemId = null;
+                checkoutForm.hidden = true;
+            }
             cartError.textContent = "";
         } catch (error) {
             setMessage(cartItems, error.message, "form-error");
@@ -89,8 +121,18 @@ document.addEventListener("DOMContentLoaded", () => {
         return key;
     }
 
+    page.querySelector("[data-checkout-cancel]").addEventListener("click", () => {
+        selectedCartItemId = null;
+        checkoutForm.hidden = true;
+        cartError.textContent = "";
+    });
+
     checkoutForm.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (selectedCartItemId === null) {
+            cartError.textContent = "Chọn sản phẩm cần mua trong giỏ hàng.";
+            return;
+        }
         if (!checkoutForm.reportValidity()) return;
         const data = new FormData(checkoutForm);
         const shippingSnapshot = {
@@ -100,7 +142,9 @@ document.addEventListener("DOMContentLoaded", () => {
             city: data.get("city").toString().trim(),
         };
         const borrow = {};
-        for (const input of page.querySelectorAll("[data-borrow-listing]")) {
+        for (const input of page.querySelectorAll(
+            `[data-borrow-listing][data-cart-item="${selectedCartItemId}"]`,
+        )) {
             const listingId = input.dataset.borrowListing;
             borrow[listingId] ||= {};
             if (input.value) {
@@ -124,14 +168,25 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const result = await OrdersAPI.checkout({
                 idempotency_key: checkoutKey(),
+                cart_item_id: selectedCartItemId,
                 shipping_address_snapshot: shippingSnapshot,
+                payment_outcome: data.get("payment_outcome"),
+                payment_method: "TEST",
                 borrow,
             });
             sessionStorage.removeItem(checkoutKeyStorage);
-            showToast(`Đã tạo nhóm đơn ${result.checkout_code}.`);
+            selectedCartItemId = null;
+            checkoutForm.hidden = true;
+            showToast(`Thanh toán thành công · đơn ${result.orders?.[0]?.order_code || result.checkout_code}.`);
             await Promise.all([loadCart(), loadOrders()]);
         } catch (error) {
-            cartError.textContent = error.message;
+            cartError.textContent = (
+                error.status === 409
+                && error.payload?.payment_status === "CANCELLED"
+                && typeof error.payload.detail === "string"
+            )
+                ? error.payload.detail
+                : error.message;
         } finally {
             submit.disabled = false;
         }
@@ -141,6 +196,18 @@ document.addEventListener("DOMContentLoaded", () => {
         const detail = await OrdersAPI.get(order.id);
         const list = document.createElement("div");
         list.className = "order-detail";
+        const summary = document.createElement("p");
+        summary.textContent = [
+            `Đơn: ${detail.status}`,
+            `Đặt lúc: ${new Date(detail.created_at).toLocaleString("vi-VN")}`,
+            detail.shipping_address?.recipient_name
+                ? `Người nhận: ${detail.shipping_address.recipient_name}`
+                : "",
+            detail.shipping_address?.address_line
+                ? `Địa chỉ: ${detail.shipping_address.address_line}, ${detail.shipping_address.city || ""}`
+                : "",
+        ].filter(Boolean).join(" · ");
+        list.append(summary);
         (detail.items || []).forEach((item) => {
             const row = document.createElement("p");
             row.textContent = `${item.title} · ${money(item.unit_price)}`;
@@ -454,14 +521,22 @@ document.addEventListener("DOMContentLoaded", () => {
             container.append(button);
         };
         if (reservation.status === "PENDING" && isOwner) {
-            addAction("confirm", "Xác nhận");
+            addAction("confirm", reservation.listing_type === "BORROW" ? "Duyệt mượn" : "Xác nhận");
             addAction("reject", "Từ chối");
         }
-        if (["PENDING", "CONFIRMED"].includes(reservation.status) && isRequester) {
+        if (isRequester && (
+            reservation.status === "PENDING"
+            || (reservation.status === "CONFIRMED" && reservation.listing_type !== "BORROW")
+        )) {
             addAction("cancel", "Hủy yêu cầu");
         }
         if (reservation.status === "CONFIRMED" && (isRequester || isOwner)) {
-            addAction("complete", "Hoàn tất");
+            addAction(
+                "complete",
+                reservation.listing_type === "BORROW"
+                    ? (isRequester ? "Đánh dấu đã trả" : "Xác nhận đã nhận lại")
+                    : "Hoàn tất",
+            );
         }
     };
 
@@ -473,9 +548,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 const card = document.createElement("article");
                 card.className = "report-item";
                 const title = document.createElement("strong");
-                title.textContent = `Đặt giữ sách #${reservation.book_id}`;
+                title.textContent = reservation.listing_type === "BORROW"
+                    ? `Yêu cầu mượn sách #${reservation.book_id}`
+                    : `Đặt giữ sách #${reservation.book_id}`;
                 const status = document.createElement("span");
-                status.textContent = `${reservation.status} · hết hạn ${new Date(reservation.expires_at).toLocaleString("vi-VN")}`;
+                status.textContent = reservation.listing_type === "BORROW"
+                    && reservation.status === "CONFIRMED"
+                    ? "Đang mượn · chờ xác nhận trả sách"
+                    : `${reservation.status} · hết hạn ${new Date(reservation.expires_at).toLocaleString("vi-VN")}`;
                 card.append(title, status);
                 reservationActions(reservation, card);
                 return card;

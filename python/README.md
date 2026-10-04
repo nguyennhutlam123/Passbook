@@ -85,14 +85,30 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
 - **Auth:** register/OTP, login/OTP tùy chọn, refresh/logout, password reset và profile.
 - **Catalog:** danh sách phân trang, keyword, trường/khoa/ngành, môn/mã môn, ISBN/tác giả,
   phiên bản/năm/ngôn ngữ, condition, khoảng giá và sort. Các lựa chọn filter lấy từ API.
-- **Books:** danh sách, chi tiết, tin đăng CRUD, ảnh và my-books.
+- **Books:** marketplace Mua dùng `sale_listings`; marketplace Mượn dùng `lend_listings`
+  và `borrow_terms`. Form đăng tin mặc định BUY cho client/dữ liệu legacy không gửi type.
 - **Commerce:** cart, checkout, order, payment simulation, shipping/tracking, return/refund.
+- **Borrow:** đăng ký qua `book_reservations`, không qua Cart/Checkout/Order. Với schema Lite
+  hiện tại, reservation `CONFIRMED` biểu diễn sách đang được mượn; `COMPLETED` biểu diễn đã trả.
+  `expires_at` chỉ là hạn phản hồi request đang `PENDING`, không phải ngày bắt đầu/kết thúc mượn.
 - **Requests:** dự định mua/bán, book requests, matching và interests.
 - **Favorites:** thêm, xóa và danh sách sách yêu thích.
 - **Messaging:** conversations và messages.
 - **Notifications:** danh sách và đánh dấu đã đọc.
 - **Reports:** tạo report và danh sách report của người dùng.
 - **Profiles:** profile người dùng và seller profile công khai.
+
+Cart bán sách coi mỗi listing là một bản duy nhất: API chặn item trùng, báo giá lại từ listing
+trong database và không nhận giá/tổng tiền từ frontend. Checkout chỉ tạo Order/Payment, đánh dấu
+listing đã bán và xóa cart item sau Fake Payment SUCCESS; FAILURE/CANCEL giữ nguyên Cart. Fake
+checkout chỉ hoạt động khi cấu hình `PASSBOOK_ENVIRONMENT=local` (hoặc `test`) và
+`PASSBOOK_FAKE_PAYMENTS_ENABLED=true`. Phí vận chuyển hiện là 0 vì Lite schema/project chưa có
+quy tắc tính phí giao hàng.
+
+BUY và BORROW là hai listing model riêng đã có trong Lite schema; không thêm cột hay migration.
+BORROW listing không xuất hiện trong trang Mua và bị từ chối tại Cart/Checkout. Khi gửi yêu cầu
+mượn, backend khóa Book, chuyển listing sang `RESERVED`, rồi khi chủ sách duyệt sẽ chuyển listing
+và Book sang `ON_LOAN`. Hoàn tất reservation trả listing về `ACTIVE` và Book về `AVAILABLE`.
 
 ## Demo data
 
@@ -113,3 +129,15 @@ Lệnh chỉ tạo các bản ghi còn thiếu (6 trường, 40 người dùng, 
 12 địa điểm, 120 sách, 240 ảnh, 120 yêu thích, 36 cuộc trò chuyện, 108 tin nhắn,
 60 thông báo và 12 báo cáo). Lệnh không chạy migrations, không xóa hoặc reset dữ liệu
 hiện có. Tài khoản demo dùng mật khẩu `PassbookDemo123!`; chỉ dùng trong môi trường demo.
+
+Để tạo riêng năm sách đa dạng phục vụ acceptance test Search/Filter, chạy lệnh sau
+từ thư mục `backend/`:
+
+```bash
+python manage.py seed_search_sample_data --confirm-local-test-db
+```
+
+Lệnh an toàn khi chạy lặp lại, chỉ tạo fixture thiếu và chỉ chạy khi database đích là
+`passbook_v12_lite_test` trên `127.0.0.1:3308`. Fixture gồm sách Toán, Vật lý và Công nghệ
+thông tin; không xóa hoặc ghi đè dữ liệu hiện có. Schema Lite không liên kết địa điểm với
+sách hoặc tin đăng nên fixture không tạo bộ lọc địa điểm giả.

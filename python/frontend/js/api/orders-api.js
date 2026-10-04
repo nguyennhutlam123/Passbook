@@ -10,6 +10,8 @@
             client.patch(`/cart/items/${path(itemId)}/`, data),
         removeCartItem: (itemId) => client.delete(`/cart/items/${path(itemId)}/`),
         clearCart: () => client.delete("/cart/items/"),
+        checkoutQuote: (query = {}) =>
+            client.get(global.PassbookApiUtils.withQuery("/checkout/", query)),
         checkout: (data) => client.post("/checkout/", data),
         list: (query = {}) =>
             client.get(global.PassbookApiUtils.withQuery("/orders/", query)),

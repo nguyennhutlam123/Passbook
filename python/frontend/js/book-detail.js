@@ -26,10 +26,14 @@ document.addEventListener("DOMContentLoaded", async () => {
                 seller: listing.seller,
                 listing_type: "BORROW",
                 listing_id: listing.id,
+                borrow_terms: listing.borrow_terms,
+                deposit_amount: listing.deposit_amount,
             };
         } else {
             book = await BooksAPI.get(id);
         }
+        container.querySelector("[data-detail-back]").href =
+            book.listing_type === "BORROW" ? "borrow.html" : "books.html";
         if (isLoggedIn()) {
             try {
                 await loadFavoriteBookIds();
@@ -79,16 +83,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         }[book.condition_status] || book.condition_label || "Tình trạng chưa rõ";
         status.textContent = `${availabilityLabels[book.status] || "Trạng thái chưa rõ"} · ${conditionLabel}`;
         container.querySelector("[data-detail-title]").textContent = book.title;
-        const favoriteButton = document.createElement("button");
-        favoriteButton.className = "button button-outline";
-        favoriteButton.type = "button";
-        const favorite = isFavoriteBook(book.id);
-        favoriteButton.className = `button button-outline ${favorite ? "is-favorite" : ""}`;
-        favoriteButton.setAttribute("aria-pressed", String(favorite));
-        favoriteButton.textContent = favorite ? "♥ Đã lưu" : "♡ Lưu giáo trình";
-        favoriteButton.dataset.favorite = String(book.id);
-        favoriteButton.addEventListener("click", () => toggleFavorite(book.id, favoriteButton));
-        container.querySelector("[data-detail-title]").after(favoriteButton);
+        if (book.listing_type !== "BORROW") {
+            const favoriteButton = document.createElement("button");
+            favoriteButton.className = "button button-outline";
+            favoriteButton.type = "button";
+            const favorite = isFavoriteBook(book.id);
+            favoriteButton.className = `button button-outline ${favorite ? "is-favorite" : ""}`;
+            favoriteButton.setAttribute("aria-pressed", String(favorite));
+            favoriteButton.textContent = favorite ? "♥ Đã lưu" : "♡ Lưu giáo trình";
+            favoriteButton.dataset.favorite = String(book.id);
+            favoriteButton.addEventListener("click", () => toggleFavorite(book.id, favoriteButton));
+            container.querySelector("[data-detail-title]").after(favoriteButton);
+        }
         container.querySelector("[data-detail-price]").textContent = book.listing_type === "BORROW"
             ? `Phí mượn · ${formatPrice(Number(book.price))}`
             : formatPrice(Number(book.price));
@@ -103,6 +109,15 @@ document.addEventListener("DOMContentLoaded", async () => {
             ["Năm xuất bản", book.publication_year],
             ["Ngôn ngữ", book.language?.name],
             ["Tình trạng sách", book.condition_description],
+            ...(book.listing_type === "BORROW" ? [
+                ["Thời hạn mượn tối đa", book.borrow_terms?.max_days
+                    ? `${book.borrow_terms.max_days} ngày`
+                    : null],
+                ["Bên chịu phí giao nhận", book.borrow_terms?.shipping_paid_by],
+                ["Cách trả sách", book.borrow_terms?.return_method],
+                ["Tiền đặt cọc", book.deposit_amount],
+                ["Điều kiện mượn", book.borrow_terms?.notes],
+            ] : []),
         ];
         container.querySelector("[data-detail-meta]").innerHTML = detailFields
             .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "—")}</dd></div>`)
@@ -141,35 +156,45 @@ document.addEventListener("DOMContentLoaded", async () => {
                 intentPanel.append(button);
             }
         };
-        try {
-            renderIntentPanel(await BooksAPI.intentSummary(book.id));
-        } catch (intentError) {
-            intentPanel.replaceChildren(PassbookCommonComponents.emptyState(
-                "Không thể tải số người dự định mua/bán.",
-                intentError.message,
-            ));
+        if (book.listing_type === "BORROW") {
+            intentPanel.hidden = true;
+        } else {
+            try {
+                renderIntentPanel(await BooksAPI.intentSummary(book.id));
+            } catch (intentError) {
+                intentPanel.replaceChildren(PassbookCommonComponents.emptyState(
+                    "Không thể tải số người dự định mua/bán.",
+                    intentError.message,
+                ));
+            }
         }
         const sellerName = book.seller?.name || "Người bán";
         container.querySelector("[data-detail-seller]").innerHTML = `<div class="seller-line"><span class="avatar">${escapeHtml(sellerName.slice(0, 2).toUpperCase())}</span><strong>${escapeHtml(sellerName)}</strong></div><p class="caption">${escapeHtml(book.seller?.university?.name || "Trường chưa khai báo")}</p>`;
         const actions = container.querySelector("[data-detail-actions]");
         actions.innerHTML = "";
         if (book.status === "available" && Number(book.seller?.id) !== Number(PassbookAuth.getCurrentUser()?.id)) {
-            const cartButton = document.createElement("button");
-            cartButton.className = "button button-primary";
-            cartButton.type = "button";
-            cartButton.textContent = book.listing_type === "BORROW"
-                ? "Thêm vào giỏ mượn"
-                : "Thêm vào giỏ";
-            cartButton.addEventListener("click", async () => {
-                if (!PassbookGuards.requireAuth()) return;
-                cartButton.disabled = true;
-                try {
-                    if (book.listing_type === "BORROW") {
-                        await OrdersAPI.addCartItem({
-                            listing_type: "BORROW",
-                            listing_id: book.listing_id,
-                        });
-                    } else {
+            if (book.listing_type === "BORROW") {
+                const borrowButton = document.createElement("button");
+                borrowButton.className = "button button-primary";
+                borrowButton.type = "button";
+                borrowButton.textContent = "Đăng ký mượn";
+                borrowButton.addEventListener("click", () => {
+                    openBorrowReservationDialog({
+                        bookId: book.id,
+                        listingId: book.listing_id,
+                        title: book.title,
+                    });
+                });
+                actions.appendChild(borrowButton);
+            } else {
+                const cartButton = document.createElement("button");
+                cartButton.className = "button button-primary";
+                cartButton.type = "button";
+                cartButton.textContent = "Thêm vào giỏ";
+                cartButton.addEventListener("click", async () => {
+                    if (!PassbookGuards.requireAuth()) return;
+                    cartButton.disabled = true;
+                    try {
                         let pageNumber = 1;
                         let listing = null;
                         let hasNext = true;
@@ -195,47 +220,43 @@ document.addEventListener("DOMContentLoaded", async () => {
                             listing_type: "SALE",
                             listing_id: listing.id,
                         });
+                        window.location.assign("workspace.html#cart-title");
+                    } catch (error) {
+                        showToast(error.message);
+                    } finally {
+                        cartButton.disabled = false;
                     }
-                    window.location.assign("workspace.html#cart-title");
-                } catch (error) {
-                    showToast(error.message);
-                } finally {
-                    cartButton.disabled = false;
-                }
-            });
-            actions.appendChild(cartButton);
-
-            if (book.listing_type !== "BORROW") {
+                });
                 const reserveButton = document.createElement("button");
                 reserveButton.className = "button button-outline";
                 reserveButton.type = "button";
                 reserveButton.textContent = "Đặt giữ";
                 reserveButton.addEventListener("click", () => {
-                if (!PassbookGuards.requireAuth()) return;
-                const defaultExpiry = toLocalDateTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
-                const minimumExpiry = toLocalDateTime(new Date());
-                showModal(`<form data-reservation-form><button class="modal-close" type="button" data-modal-close>Đóng</button><h2>Đặt giữ giáo trình</h2><label class="form-label" for="reservation-expiry">Giữ đến</label><input class="form-control" id="reservation-expiry" name="expires_at" type="datetime-local" min="${minimumExpiry}" value="${defaultExpiry}" required><p class="form-error" data-reservation-error></p><div class="modal-actions"><button class="button button-primary" type="submit">Gửi yêu cầu</button></div></form>`);
-                const form = document.querySelector("[data-reservation-form]");
-                form.addEventListener("submit", async (event) => {
-                    event.preventDefault();
-                    if (!form.reportValidity()) return;
-                    const submit = form.querySelector("button[type='submit']");
-                    const error = form.querySelector("[data-reservation-error]");
-                    submit.disabled = true;
-                    error.textContent = "";
-                    try {
-                        const expiresAt = new Date(new FormData(form).get("expires_at").toString());
-                        await ReservationsAPI.create(book.id, {expires_at: expiresAt.toISOString()});
-                        closeModal();
-                        showToast("Đã gửi yêu cầu đặt giữ.");
-                    } catch (requestError) {
-                        error.textContent = requestError.message;
-                    } finally {
-                        submit.disabled = false;
-                    }
+                    if (!PassbookGuards.requireAuth()) return;
+                    const defaultExpiry = toLocalDateTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
+                    const minimumExpiry = toLocalDateTime(new Date());
+                    showModal(`<form data-reservation-form><button class="modal-close" type="button" data-modal-close>Đóng</button><h2>Đặt giữ giáo trình</h2><label class="form-label" for="reservation-expiry">Giữ đến</label><input class="form-control" id="reservation-expiry" name="expires_at" type="datetime-local" min="${minimumExpiry}" value="${defaultExpiry}" required><p class="form-error" data-reservation-error></p><div class="modal-actions"><button class="button button-primary" type="submit">Gửi yêu cầu</button></div></form>`);
+                    const form = document.querySelector("[data-reservation-form]");
+                    form.addEventListener("submit", async (event) => {
+                        event.preventDefault();
+                        if (!form.reportValidity()) return;
+                        const submit = form.querySelector("button[type='submit']");
+                        const error = form.querySelector("[data-reservation-error]");
+                        submit.disabled = true;
+                        error.textContent = "";
+                        try {
+                            const expiresAt = new Date(new FormData(form).get("expires_at").toString());
+                            await ReservationsAPI.create(book.id, {expires_at: expiresAt.toISOString()});
+                            closeModal();
+                            showToast("Đã gửi yêu cầu đặt giữ.");
+                        } catch (requestError) {
+                            error.textContent = requestError.message;
+                        } finally {
+                            submit.disabled = false;
+                        }
+                    });
                 });
-                });
-                actions.appendChild(reserveButton);
+                actions.append(cartButton, reserveButton);
             }
 
             const messageButton = document.createElement("button");

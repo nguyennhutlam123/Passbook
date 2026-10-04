@@ -18,7 +18,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         grid.innerHTML = visible.map((book) => `${renderBookCard(book)}<div class="listing-actions">
             <button class="button button-outline" data-edit="${book.id}">Sửa</button>
             <button class="button button-outline" data-delete="${book.id}">Xóa</button>
-            ${book.status === "available" ? `<button class="button button-outline" data-sold="${book.id}">Đánh dấu đã bán</button>` : ""}
+            ${book.status === "available" && book.listing_type !== "BORROW" ? `<button class="button button-outline" data-sold="${book.id}">Đánh dấu đã bán</button>` : ""}
         </div>`).join("");
         grid.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => {
             const book = books.find((item) => item.id === Number(button.dataset.edit));

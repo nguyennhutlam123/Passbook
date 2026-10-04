@@ -15,6 +15,7 @@ from .models import (
     BookIdentifier,
     BookImage,
     BookWorkSubject,
+    LendListing,
     SaleListing,
 )
 from .pagination import BookPagination
@@ -262,6 +263,13 @@ class SaleListingListCreateView(APIView):
         ).exists():
             raise serializers.ValidationError({
                 'book_id': 'Sách đã có listing chưa thể đăng bán lại.',
+            })
+        if LendListing.objects.filter(
+            book=book,
+            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+        ).exists():
+            raise serializers.ValidationError({
+                'book_id': 'Sách đang có tin cho mượn hoạt động.',
             })
         now = timezone.now()
         try:

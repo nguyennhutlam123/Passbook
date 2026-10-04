@@ -11,7 +11,15 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from notifications.models import Notification
 
-from .models import BookReservation, BorrowOrder, Order, Payment, Refund
+from .models import (
+    Book,
+    BookReservation,
+    BorrowOrder,
+    LendListing,
+    Order,
+    Payment,
+    Refund,
+)
 
 
 MONEY_QUANTUM = Decimal('0.0001')
@@ -197,9 +205,9 @@ def transition_reservation(reservation_id, actor, action):
     reservation = (
         BookReservation.objects
         .select_for_update()
-        .select_related('book')
         .get(pk=reservation_id)
     )
+    reservation.book = Book.objects.select_for_update().get(pk=reservation.book_id)
     if action in ('confirm', 'reject') and actor.id != reservation.owner_id:
         raise PermissionDenied('Chỉ chủ sách mới được xử lý yêu cầu đặt sách.')
     if action == 'cancel' and actor.id != reservation.requester_id:
@@ -213,15 +221,31 @@ def transition_reservation(reservation_id, actor, action):
         raise ValidationError('Thao tác đặt sách không hợp lệ.')
 
     now = timezone.now()
-    active_listing = (
-        reservation.book.sale_listings
+    lend_listing = (
+        LendListing.objects
         .select_for_update()
-        .filter(status__in=('ACTIVE', 'RESERVED'))
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .filter(
+            book_id=reservation.book_id,
+            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+        )
         .order_by('-created_at', '-id')
         .first()
     )
-    if reservation.status in ('PENDING', 'CONFIRMED') and reservation.expires_at <= now:
+    is_borrow = lend_listing is not None
+    active_listing = None
+    if not is_borrow:
+        active_listing = (
+            reservation.book.sale_listings
+            .select_for_update()
+            .filter(status__in=('ACTIVE', 'RESERVED'))
+            .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+            .order_by('-created_at', '-id')
+            .first()
+        )
+    expires = reservation.status == 'PENDING' or (
+        reservation.status == 'CONFIRMED' and not is_borrow
+    )
+    if expires and reservation.expires_at <= now:
         reservation.status = 'EXPIRED'
         reservation.updated_at = now
         reservation.save(update_fields=['status', 'updated_at'])
@@ -233,25 +257,37 @@ def transition_reservation(reservation_id, actor, action):
             reservation.book.status = 'AVAILABLE'
             reservation.book.updated_at = now
             reservation.book.save(update_fields=['status', 'updated_at'])
+        if is_borrow and lend_listing.status == 'RESERVED':
+            lend_listing.status = 'ACTIVE'
+            lend_listing.updated_at = now
+            lend_listing.save(update_fields=['status', 'updated_at'])
 
     if action in ('confirm', 'reject'):
         if reservation.status != 'PENDING':
             raise ValidationError('Chỉ yêu cầu đang chờ mới có thể xác nhận hoặc từ chối.')
-        if action == 'confirm' and (
-            active_listing is None or active_listing.status != 'ACTIVE'
-        ):
-            raise ValidationError('Tin đăng không còn khả dụng để xác nhận đặt sách.')
+        if action == 'confirm':
+            if is_borrow:
+                if lend_listing.status != 'RESERVED':
+                    raise ValidationError('Tin cho mượn không còn được giữ cho yêu cầu này.')
+            elif active_listing is None or active_listing.status != 'ACTIVE':
+                raise ValidationError('Tin đăng không còn khả dụng để xác nhận đặt sách.')
         reservation.status = 'CONFIRMED' if action == 'confirm' else 'REJECTED'
         if action == 'confirm':
-            reservation.book.status = 'RESERVED'
+            reservation.book.status = 'ON_LOAN' if is_borrow else 'RESERVED'
             reservation.book.updated_at = now
             reservation.book.save(update_fields=['status', 'updated_at'])
-            active_listing.status = 'RESERVED'
-            active_listing.updated_at = now
-            active_listing.save(update_fields=['status', 'updated_at'])
+            if is_borrow:
+                lend_listing.status = 'ON_LOAN'
+                lend_listing.updated_at = now
+                lend_listing.save(update_fields=['status', 'updated_at'])
+            else:
+                active_listing.status = 'RESERVED'
+                active_listing.updated_at = now
+                active_listing.save(update_fields=['status', 'updated_at'])
         recipient_id = reservation.requester_id
     elif action == 'cancel':
-        if reservation.status not in ('PENDING', 'CONFIRMED'):
+        allowed_statuses = ('PENDING',) if is_borrow else ('PENDING', 'CONFIRMED')
+        if reservation.status not in allowed_statuses:
             raise ValidationError('Yêu cầu này không thể hủy ở trạng thái hiện tại.')
         reservation.status = 'CANCELLED'
         recipient_id = reservation.owner_id
@@ -274,10 +310,14 @@ def transition_reservation(reservation_id, actor, action):
             status='ACTIVE',
             updated_at=now,
         )
-        if reservation.book.status == 'RESERVED':
+        if reservation.book.status in ('RESERVED', 'ON_LOAN'):
             reservation.book.status = 'AVAILABLE'
             reservation.book.updated_at = now
             reservation.book.save(update_fields=['status', 'updated_at'])
+        if is_borrow and lend_listing.status in ('RESERVED', 'ON_LOAN'):
+            lend_listing.status = 'ACTIVE'
+            lend_listing.updated_at = now
+            lend_listing.save(update_fields=['status', 'updated_at'])
     _notify(
         recipient_id,
         'BOOK_RESERVATION',

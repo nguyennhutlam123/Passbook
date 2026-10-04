@@ -21,8 +21,11 @@
             <h2 id="cart-title">Giỏ hàng</h2>
             <div class="report-list" data-cart-items><p class="loading-state">Đang tải giỏ hàng...</p></div>
             <p class="workspace-total" data-cart-total></p>
-            <form class="workspace-checkout" data-checkout-form>
-                <h3>Địa chỉ giao hàng</h3>
+            <form class="workspace-checkout" data-checkout-form hidden>
+                <h3>Checkout</h3>
+                <div data-checkout-summary>
+                    <p class="loading-state">Đang tính tiền từ server...</p>
+                </div>
                 <div class="form-group">
                     <label class="form-label" for="checkout-recipient">Người nhận</label>
                     <input class="form-control" id="checkout-recipient" name="recipient_name" required maxlength="255">
@@ -39,7 +42,18 @@
                     <label class="form-label" for="checkout-city">Tỉnh / thành phố</label>
                     <input class="form-control" id="checkout-city" name="city" required maxlength="255">
                 </div>
-                <button class="button button-primary" type="submit">Thanh toán / tạo đơn</button>
+                <div class="form-group">
+                    <label class="form-label" for="checkout-payment-outcome">Phương thức thanh toán</label>
+                    <select class="form-control" id="checkout-payment-outcome" name="payment_outcome">
+                        <option value="SUCCESS">Fake Payment Provider — Thành công</option>
+                        <option value="FAILURE">Fake Payment Provider — Thất bại</option>
+                        <option value="CANCEL">Fake Payment Provider — Hủy</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button class="button button-outline" type="button" data-checkout-cancel>Hủy</button>
+                    <button class="button button-primary" type="submit">Đặt hàng</button>
+                </div>
             </form>
             <p class="form-error" role="alert" data-cart-error></p>
         </section>
@@ -52,7 +66,7 @@
         </section>
         <section class="workspace-section" aria-labelledby="reservations-title">
             <div class="section-heading">
-                <h2 id="reservations-title">Yêu cầu đặt giữ</h2>
+                <h2 id="reservations-title">Yêu cầu mượn / đặt giữ</h2>
                 <button class="button button-outline" type="button" data-reservations-refresh>Cập nhật</button>
             </div>
             <div class="report-list" data-reservations-list><p class="loading-state">Đang tải yêu cầu...</p></div>

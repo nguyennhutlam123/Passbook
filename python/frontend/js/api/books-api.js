@@ -40,13 +40,16 @@
         deleteImage: (bookId, imageId) =>
             client.delete(`/books/${idPath(bookId)}/images/${idPath(imageId)}/`),
         cloudinarySignature: () => client.get("/uploads/cloudinary/signature/"),
-        uploadImage: async (bookId, file, options = {}) => {
-            const signature = options.signature || await client.get("/uploads/cloudinary/signature/");
+        cleanupCloudinary: (publicIds) =>
+            client.post("/uploads/cloudinary/cleanup/", {public_ids: publicIds}),
+        uploadCloudinary: async (file) => {
+            const signature = await client.get("/uploads/cloudinary/signature/");
             const body = new FormData();
             body.append("file", file);
             body.append("api_key", signature.api_key);
             body.append("timestamp", signature.timestamp);
             body.append("asset_folder", signature.asset_folder);
+            body.append("public_id", signature.public_id);
             body.append("signature", signature.signature);
             const uploaded = await client.request(
                 `https://api.cloudinary.com/v1_1/${encodeURIComponent(signature.cloud_name)}/image/upload`,
@@ -58,9 +61,15 @@
                     {status: 502, code: "invalid_upload_response"},
                 );
             }
-            return global.BooksAPI.addImage(bookId, {
+            return {
                 image_url: uploaded.secure_url,
-                cloudinary_public_id: uploaded.public_id || null,
+                cloudinary_public_id: uploaded.public_id || signature.public_id,
+            };
+        },
+        uploadImage: async (bookId, file, options = {}) => {
+            const uploaded = await global.BooksAPI.uploadCloudinary(file);
+            return global.BooksAPI.addImage(bookId, {
+                ...uploaded,
                 is_primary: Boolean(options.isPrimary),
                 sort_order: Number(options.sortOrder) || 0,
             });

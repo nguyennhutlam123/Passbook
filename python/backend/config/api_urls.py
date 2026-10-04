@@ -1,5 +1,12 @@
 import hashlib
+import json
+import re
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+import secrets
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -125,8 +132,10 @@ class CloudinaryUploadSignatureView(APIView):
             )
 
         timestamp = int(time.time())
+        public_id = f'user-{request.user.id}-{secrets.token_hex(16)}'
         parameters = {
             'asset_folder': settings.CLOUDINARY_UPLOAD_FOLDER,
+            'public_id': public_id,
             'timestamp': timestamp,
         }
         signature_base = '&'.join(
@@ -139,9 +148,90 @@ class CloudinaryUploadSignatureView(APIView):
             'cloud_name': settings.CLOUDINARY_CLOUD_NAME,
             'api_key': settings.CLOUDINARY_API_KEY,
             'asset_folder': settings.CLOUDINARY_UPLOAD_FOLDER,
+            'public_id': public_id,
             'timestamp': timestamp,
             'signature': signature,
         })
+
+
+class CloudinaryUploadCleanupView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        public_ids = request.data.get('public_ids')
+        if (
+            not isinstance(public_ids, list)
+            or not public_ids
+            or len(public_ids) > 10
+            or any(
+                not isinstance(public_id, str)
+                or not re.fullmatch(
+                    rf'user-{request.user.id}-[a-f0-9]{{32}}',
+                    public_id,
+                )
+                for public_id in public_ids
+            )
+            or len(public_ids) != len(set(public_ids))
+        ):
+            raise serializers.ValidationError({
+                'public_ids': 'Chỉ có thể dọn tối đa 10 ảnh tải lên bởi tài khoản hiện tại.',
+            })
+
+        missing = [
+            name for name, value in (
+                ('CLOUDINARY_CLOUD_NAME', settings.CLOUDINARY_CLOUD_NAME),
+                ('CLOUDINARY_API_KEY', settings.CLOUDINARY_API_KEY),
+                ('CLOUDINARY_API_SECRET', settings.CLOUDINARY_API_SECRET),
+            ) if not value
+        ]
+        if missing:
+            return Response(
+                {'detail': 'Cloudinary chưa được cấu hình.', 'missing': missing},
+                status=503,
+            )
+
+        results = []
+        for public_id in public_ids:
+            timestamp = int(time.time())
+            parameters = {
+                'public_id': public_id,
+                'timestamp': timestamp,
+            }
+            signature_base = '&'.join(
+                f'{key}={value}' for key, value in sorted(parameters.items())
+            )
+            signature = hashlib.sha1(
+                f'{signature_base}{settings.CLOUDINARY_API_SECRET}'.encode(),
+            ).hexdigest()
+            body = urllib.parse.urlencode({
+                **parameters,
+                'api_key': settings.CLOUDINARY_API_KEY,
+                'signature': signature,
+            }).encode()
+            url = (
+                f'https://api.cloudinary.com/v1_1/'
+                f'{urllib.parse.quote(settings.CLOUDINARY_CLOUD_NAME, safe="")}'
+                '/image/destroy'
+            )
+            cloudinary_request = urllib.request.Request(
+                url,
+                data=body,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                method='POST',
+            )
+            try:
+                with urllib.request.urlopen(cloudinary_request, timeout=15) as response:
+                    payload = json.loads(response.read())
+                results.append({
+                    'public_id': public_id,
+                    'result': payload.get('result', 'unknown'),
+                })
+            except (urllib.error.URLError, json.JSONDecodeError):
+                return Response(
+                    {'detail': 'Cloudinary không thể xóa ảnh tạm đã tải lên.'},
+                    status=502,
+                )
+        return Response({'results': results})
 
 
 class CatalogOptionsView(APIView):
@@ -202,6 +292,11 @@ urlpatterns = [
         'uploads/cloudinary/signature/',
         CloudinaryUploadSignatureView.as_view(),
         name='cloudinary-upload-signature',
+    ),
+    path(
+        'uploads/cloudinary/cleanup/',
+        CloudinaryUploadCleanupView.as_view(),
+        name='cloudinary-upload-cleanup',
     ),
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login'),

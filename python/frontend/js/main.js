@@ -70,6 +70,54 @@ function showModal(content) {
     });
 }
 
+function openBorrowReservationDialog({bookId, listingId, title}) {
+    if (!PassbookGuards.requireAuth()) return;
+    const formatLocalDateTime = (date) =>
+        new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+            .toISOString()
+            .slice(0, 16);
+    const minimumExpiry = formatLocalDateTime(new Date());
+    const defaultExpiry = formatLocalDateTime(
+        new Date(Date.now() + 24 * 60 * 60 * 1000),
+    );
+    showModal(`<form data-borrow-reservation-form>
+        <button class="modal-close" type="button" data-modal-close>Đóng</button>
+        <h2>Đăng ký mượn sách</h2>
+        <p><strong>${escapeHtml(title || "Giáo trình")}</strong></p>
+        <label class="form-label" for="borrow-request-expiry">Yêu cầu có hiệu lực đến</label>
+        <input class="form-control" id="borrow-request-expiry" name="expires_at" type="datetime-local" min="${minimumExpiry}" value="${defaultExpiry}" required>
+        <p class="caption">Đây là thời hạn phản hồi yêu cầu theo schema; ngày bắt đầu và ngày trả chưa được lưu trong BookReservation.</p>
+        <p class="form-error" data-borrow-reservation-error></p>
+        <div class="modal-actions">
+            <button class="button button-outline" type="button" data-modal-close>Hủy</button>
+            <button class="button button-primary" type="submit">Gửi yêu cầu mượn</button>
+        </div>
+    </form>`);
+    const form = document.querySelector("[data-borrow-reservation-form]");
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const submit = form.querySelector("button[type='submit']");
+        const error = form.querySelector("[data-borrow-reservation-error]");
+        submit.disabled = true;
+        error.textContent = "";
+        try {
+            const expiresAt = new Date(
+                new FormData(form).get("expires_at").toString(),
+            );
+            const reservation = await ReservationsAPI.create(bookId, {
+                expires_at: expiresAt.toISOString(),
+            });
+            closeModal();
+            showToast(`Đã gửi yêu cầu mượn #${reservation.id}. Theo dõi trạng thái trong Giao dịch.`);
+        } catch (requestError) {
+            error.textContent = requestError.message;
+        } finally {
+            submit.disabled = false;
+        }
+    });
+}
+
 function showToast(message) {
     document.querySelector(".toast")?.remove();
     const toast = document.createElement("div");

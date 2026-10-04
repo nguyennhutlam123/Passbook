@@ -22,6 +22,23 @@
     margin-top: 1rem;
 }
 
+.cart-item-cover {
+    align-items: center;
+    background: var(--surface-muted, #f1f3f5);
+    border-radius: var(--border-radius);
+    display: flex;
+    height: 7rem;
+    justify-content: center;
+    overflow: hidden;
+    width: 5.5rem;
+}
+
+.cart-item-cover img {
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
 .borrow-date-fields {
     display: grid;
     gap: 1rem;

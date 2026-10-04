@@ -79,8 +79,9 @@
             <div class="nav-menu" id="site-nav">
                 <div class="nav-links">
                     <a class="${page === "index.html" ? "is-active" : ""}" href="${basePath}index.html">Trang chủ</a>
-                    <a class="${page === "books.html" ? "is-active" : ""}" href="${basePath}books.html">Tìm giáo trình</a>
-                    <a class="${page === "sell.html" ? "is-active" : ""}" href="${basePath}sell.html">Đăng bán</a>
+                    <a class="${page === "books.html" ? "is-active" : ""}" href="${basePath}books.html">Mua giáo trình</a>
+                    <a class="${page === "borrow.html" ? "is-active" : ""}" href="${basePath}borrow.html">Mượn giáo trình</a>
+                    <a class="${page === "sell.html" ? "is-active" : ""}" href="${basePath}sell.html">Đăng tin</a>
                 </div>
                 <form class="nav-search" data-nav-search>
                     <label class="sr-only" for="nav-search-input">Tìm kiếm sách</label>
@@ -102,7 +103,7 @@
         return `<div class="page-shell footer-grid">
             <div><h2>PASSBOOK</h2><p>Mua bán giáo trình trong cùng trường.</p></div>
             <div><h3>Liên kết</h3><div class="footer-links">
-                <a href="${basePath}index.html">Trang chủ</a><a href="${basePath}books.html">Tìm giáo trình</a><a href="${basePath}sell.html">Đăng bán</a>
+                <a href="${basePath}index.html">Trang chủ</a><a href="${basePath}books.html">Mua giáo trình</a><a href="${basePath}borrow.html">Mượn giáo trình</a><a href="${basePath}sell.html">Đăng tin</a>
             </div></div>
             <div><h3>Hỗ trợ</h3><div class="footer-links">
                 <a href="${basePath}index.html#guide">Hướng dẫn</a><a href="${basePath}index.html#terms">Điều khoản</a><a href="${basePath}index.html#privacy">Chính sách</a>

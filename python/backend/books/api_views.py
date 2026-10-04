@@ -16,8 +16,11 @@ from .models import (
     BookIdentifier,
     BookImage,
     BookRequest,
+    BorrowTerms,
+    LendListing,
     BookWorkSubject,
     Favorite,
+    LendListing,
     SaleListing,
 )
 from .pagination import BookPagination
@@ -34,12 +37,13 @@ def optimized_books_queryset(
     include_history=False,
     primary_images_only=False,
     list_payload=False,
+    active_only=False,
 ):
     listings = SaleListing.objects.order_by('-created_at', '-id')
     if not include_history:
         now = timezone.now()
         listings = listings.filter(
-            status__in=('ACTIVE', 'RESERVED'),
+            status__in=('ACTIVE',) if active_only else ('ACTIVE', 'RESERVED'),
         ).filter(
             Q(expires_at__isnull=True) | Q(expires_at__gt=now),
         )
@@ -151,6 +155,35 @@ def optimized_books_queryset(
         ),
     ]
     if not list_payload:
+        lend_listings = LendListing.objects.order_by('-created_at', '-id')
+        if not include_history:
+            lend_listings = lend_listings.filter(
+                status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+            )
+        lend_listings = lend_listings.prefetch_related(
+            Prefetch(
+                'borrow_terms',
+                queryset=BorrowTerms.objects.only(
+                    'id',
+                    'lend_listing_id',
+                    'max_days',
+                    'late_fee_per_day',
+                    'deposit_required',
+                    'shipping_paid_by',
+                    'return_method',
+                    'notes',
+                ),
+                to_attr='listing_terms',
+            ),
+        )
+        prefetches.append(
+            Prefetch(
+                'lend_listings',
+                queryset=lend_listings,
+                to_attr='active_lend_listings',
+            ),
+        )
+    if not list_payload:
         prefetches.append(
             Prefetch(
                 'book_edition__identifiers',
@@ -161,6 +194,7 @@ def optimized_books_queryset(
 
 
 def _with_search(queryset, search):
+    search = (search or '').strip()
     if not search:
         return queryset
     subject_match = BookWorkSubject.objects.filter(
@@ -169,7 +203,12 @@ def _with_search(queryset, search):
         Q(subject__name__icontains=search)
         | Q(subject__code__icontains=search)
     )
-    sale_listing_match = SaleListing.objects.filter(book_id=OuterRef('pk')).filter(
+    sale_listing_match = SaleListing.objects.filter(
+        book_id=OuterRef('pk'),
+        status='ACTIVE',
+    ).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+    ).filter(
         Q(title__icontains=search) | Q(description__icontains=search),
     )
     identifier_match = BookIdentifier.objects.filter(
@@ -191,6 +230,9 @@ def _with_search(queryset, search):
             | Q(book_edition__publisher_name__icontains=search)
             | Q(book_edition__description__icontains=search)
             | Q(book_edition__book_work__category__name__icontains=search)
+            | Q(owner__university__name__icontains=search)
+            | Q(owner__faculty__name__icontains=search)
+            | Q(owner__major__name__icontains=search)
             | Q(_identifier_match=True)
         )
     )
@@ -201,15 +243,18 @@ class BookListView(APIView):
         queryset = optimized_books_queryset(
             primary_images_only=True,
             list_payload=True,
+            active_only=True,
         ).filter(
             status='AVAILABLE',
-            sale_listings__status='ACTIVE',
         )
         now = timezone.now()
-        queryset = queryset.filter(
-            Q(sale_listings__expires_at__isnull=True)
-            | Q(sale_listings__expires_at__gt=now),
+        active_listings = SaleListing.objects.filter(
+            book_id=OuterRef('pk'),
+            status='ACTIVE',
+        ).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=now),
         )
+        queryset = queryset.filter(Exists(active_listings))
         query_params = request.query_params
         queryset = _with_search(queryset, query_params.get('search'))
 
@@ -257,6 +302,14 @@ class BookListView(APIView):
                 book_work_id=OuterRef('book_edition__book_work_id'),
                 subject__code__icontains=subject_code,
             )))
+        subject = (query_params.get('subject') or '').strip()
+        if subject:
+            queryset = queryset.filter(Exists(BookWorkSubject.objects.filter(
+                book_work_id=OuterRef('book_edition__book_work_id'),
+            ).filter(
+                Q(subject__name__icontains=subject)
+                | Q(subject__code__icontains=subject),
+            )))
         isbn = (query_params.get('isbn') or '').strip()
         if isbn:
             queryset = queryset.filter(Exists(BookIdentifier.objects.filter(
@@ -269,6 +322,22 @@ class BookListView(APIView):
                 'pickup_location_id': 'Điểm nhận riêng không thuộc schema Lite; trường lọc này đã ngừng hỗ trợ.',
             })
 
+        university = (query_params.get('university') or '').strip()
+        if university:
+            queryset = queryset.filter(
+                owner__university__name__icontains=university,
+            )
+        faculty = (query_params.get('faculty') or '').strip()
+        if faculty:
+            queryset = queryset.filter(
+                owner__faculty__name__icontains=faculty,
+            )
+        major = (query_params.get('major') or '').strip()
+        if major:
+            queryset = queryset.filter(
+                owner__major__name__icontains=major,
+            )
+
         condition = query_params.get('condition_status')
         if condition:
             valid_conditions = {value for value, _ in Book.CONDITION_CHOICES}
@@ -280,25 +349,40 @@ class BookListView(APIView):
 
         min_price = self._parse_price(query_params, 'min_price')
         max_price = self._parse_price(query_params, 'max_price')
-        if min_price is not None:
-            queryset = queryset.filter(sale_listings__price__gte=min_price)
-        if max_price is not None:
-            queryset = queryset.filter(sale_listings__price__lte=max_price)
         if min_price is not None and max_price is not None and min_price > max_price:
             raise serializers.ValidationError({
                 'price': 'min_price không được lớn hơn max_price.',
             })
+        if min_price is not None:
+            active_listings = active_listings.filter(price__gte=min_price)
+        if max_price is not None:
+            active_listings = active_listings.filter(price__lte=max_price)
+        if min_price is not None or max_price is not None:
+            queryset = queryset.filter(Exists(active_listings))
 
         sort_options = {
-            'newest': ('-sale_listings__created_at', '-id'),
-            'oldest': ('sale_listings__created_at', '-id'),
-            'price_asc': ('sale_listings__price', '-id'),
-            'price_desc': ('-sale_listings__price', '-id'),
+            'newest': ('-_catalog_created_at', '-id'),
+            'oldest': ('_catalog_created_at', '-id'),
+            'price_asc': ('_catalog_price', '-id'),
+            'price_desc': ('-_catalog_price', '-id'),
         }
         sort = query_params.get('sort', 'newest')
         if sort not in sort_options:
             raise serializers.ValidationError({'sort': 'Giá trị sort không hợp lệ.'})
-        queryset = queryset.order_by(*sort_options[sort])
+        sort_listings = SaleListing.objects.filter(
+            book_id=OuterRef('pk'),
+            status='ACTIVE',
+        ).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+        ).order_by('-created_at', '-id')
+        if min_price is not None:
+            sort_listings = sort_listings.filter(price__gte=min_price)
+        if max_price is not None:
+            sort_listings = sort_listings.filter(price__lte=max_price)
+        queryset = queryset.annotate(
+            _catalog_created_at=Subquery(sort_listings.values('created_at')[:1]),
+            _catalog_price=Subquery(sort_listings.values('price')[:1]),
+        ).order_by(*sort_options[sort])
 
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
@@ -354,6 +438,13 @@ class BookListView(APIView):
             SaleListing.objects.filter(book_id=book.pk, status='PENDING')
             .order_by('-id')[:1],
         )
+        if not book.active_sale_listings:
+            book.active_lend_listings = list(
+                LendListing.objects.filter(
+                    book_id=book.pk,
+                    status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+                ).order_by('-id')[:1],
+            )
         return Response(BookSerializer(book).data, status=status.HTTP_201_CREATED)
 
 
@@ -437,9 +528,17 @@ class BookDetailView(APIView):
     def delete(self, request, pk):
         self._require_owner(request, pk)
         book = get_object_or_404(Book, pk=pk)
+        if book.lend_listings.filter(status__in=('RESERVED', 'ON_LOAN')).exists():
+            raise serializers.ValidationError(
+                {'status': 'Không thể gỡ sách đang được giữ hoặc cho mượn.'},
+            )
         now = timezone.now()
         with transaction.atomic():
             book.sale_listings.filter(status__in=('ACTIVE', 'RESERVED')).update(
+                status='CLOSED',
+                updated_at=now,
+            )
+            book.lend_listings.filter(status='ACTIVE').update(
                 status='CLOSED',
                 updated_at=now,
             )
@@ -464,6 +563,10 @@ class BookSoldView(APIView):
         book = get_object_or_404(Book, pk=pk)
         if book.owner_id != request.user.id:
             raise PermissionDenied('Bạn không có quyền cập nhật tin đăng này.')
+        if not book.sale_listings.filter(status='ACTIVE').exists():
+            raise serializers.ValidationError(
+                {'listing_type': 'Chỉ tin BUY mới có thể đánh dấu đã bán.'},
+            )
         now = timezone.now()
         with transaction.atomic():
             book.sale_listings.filter(status='ACTIVE').update(
@@ -492,10 +595,28 @@ class BookImageListView(APIView):
         serializer.is_valid(raise_exception=True)
         now = timezone.now()
         with transaction.atomic():
-            if serializer.validated_data.get('is_primary', False):
+            current_images = BookImage.objects.select_for_update().filter(book=book)
+            if current_images.count() >= 10:
+                raise serializers.ValidationError({
+                    'images': 'Mỗi sách được đăng tối đa 10 ảnh.',
+                })
+            image_url = serializer.validated_data['image_url']
+            public_id = serializer.validated_data.get('cloudinary_public_id')
+            if current_images.filter(image_url=image_url).exists() or (
+                public_id
+                and current_images.filter(cloudinary_public_id=public_id).exists()
+            ):
+                raise serializers.ValidationError({
+                    'image_url': 'Ảnh này đã được thêm vào sách.',
+                })
+            is_primary = serializer.validated_data.get('is_primary', False)
+            if not current_images.exists():
+                is_primary = True
+            if is_primary:
                 BookImage.objects.filter(book=book, is_primary=True).update(
                     is_primary=False,
                 )
+            serializer.validated_data['is_primary'] = is_primary
             image = serializer.save(book=book, created_at=now)
         return Response(BookImageSerializer(image).data, status=status.HTTP_201_CREATED)
 
@@ -531,7 +652,16 @@ class BookImageDetailView(APIView):
     def delete(self, request, book_id, image_id):
         book = BookImageListView._get_editable_book(request, book_id)
         image = get_object_or_404(BookImage, pk=image_id, book=book)
-        image.delete()
+        with transaction.atomic():
+            was_primary = image.is_primary
+            image.delete()
+            remaining = BookImage.objects.filter(book=book)
+            if was_primary and remaining.exists() and not remaining.filter(
+                is_primary=True,
+            ).exists():
+                promoted = remaining.order_by('sort_order', 'id').first()
+                promoted.is_primary = True
+                promoted.save(update_fields=['is_primary'])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

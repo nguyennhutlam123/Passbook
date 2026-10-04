@@ -1,14 +1,34 @@
 (function (global) {
     "use strict";
 
-    function cartItem(item, {onRemove} = {}) {
+    function cartItem(item, {onRemove, onBuy} = {}) {
         const card = document.createElement("article");
         card.className = "report-item";
+        const cover = document.createElement("div");
+        cover.className = "cart-item-cover";
+        if (item.primary_image?.image_url) {
+            const image = document.createElement("img");
+            image.src = item.primary_image.image_url;
+            image.alt = `Ảnh ${item.title || "sách"}`;
+            image.loading = "lazy";
+            cover.append(image);
+        } else {
+            cover.setAttribute("role", "img");
+            cover.setAttribute("aria-label", `Chưa có ảnh bìa cho ${item.title || "sách"}`);
+            cover.textContent = "📘";
+        }
+        card.append(cover);
         const title = document.createElement("strong");
         title.textContent = item.title || "Sách";
         const meta = document.createElement("span");
-        meta.textContent = `${item.listing_type === "BORROW" ? "Mượn" : "Mua"} · ${global.formatPrice(Number(item.unit_price) || 0)}`;
+        meta.textContent = `${item.listing_type === "BORROW" ? "Mượn" : "Mua"} · ${global.formatPrice(Number(item.unit_price) || 0)} · SL 1`;
+        const seller = document.createElement("span");
+        seller.textContent = [
+            item.seller?.name,
+            item.condition_status,
+        ].filter(Boolean).join(" · ");
         card.append(title, meta);
+        if (seller.textContent) card.append(seller);
         if (item.listing_type === "BORROW") {
             const dates = document.createElement("div");
             dates.className = "borrow-date-fields";
@@ -24,6 +44,7 @@
                 input.type = "datetime-local";
                 input.required = true;
                 input.dataset.borrowListing = String(item.listing_id);
+                input.dataset.cartItem = String(item.id);
                 input.dataset.borrowField = key;
                 field.append(input);
                 dates.append(field);
@@ -35,7 +56,12 @@
         remove.type = "button";
         remove.textContent = "Xóa";
         remove.addEventListener("click", onRemove || (() => {}));
-        card.append(remove);
+        const buy = document.createElement("button");
+        buy.className = "button button-primary";
+        buy.type = "button";
+        buy.textContent = item.listing_type === "BORROW" ? "Đặt mượn" : "Mua";
+        buy.addEventListener("click", onBuy || (() => {}));
+        card.append(remove, buy);
         return card;
     }
 
@@ -43,9 +69,18 @@
         const card = document.createElement("article");
         card.className = "report-item";
         const title = document.createElement("strong");
-        title.textContent = `${order.order_code} · ${order.order_type}`;
+        title.textContent = `${order.order_code} · ${order.order_type}${order.item_titles?.length ? ` · ${order.item_titles.join(", ")}` : ""}`;
         const status = document.createElement("span");
-        status.textContent = `${order.status} · ${global.formatPrice(Number(order.total_amount) || 0)}`;
+        const orderedAt = order.created_at
+            ? new Date(order.created_at).toLocaleString("vi-VN")
+            : "";
+        status.textContent = [
+            `Đơn: ${order.status}`,
+            `Thanh toán: ${order.payment_status || "—"}`,
+            `Tổng: ${global.formatPrice(Number(order.total_amount) || 0)}`,
+            order.recipient_name ? `Người nhận: ${order.recipient_name}` : "",
+            orderedAt,
+        ].filter(Boolean).join(" · ");
         const details = document.createElement("button");
         details.className = "button button-outline";
         details.type = "button";

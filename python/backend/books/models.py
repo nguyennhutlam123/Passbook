@@ -151,20 +151,46 @@ class Book(models.Model):
             return next((item for item in listings if item.status in ('ACTIVE', 'RESERVED')), None)
         return self.sale_listings.filter(status__in=('ACTIVE', 'RESERVED')).first()
 
+    def _active_lend_listing(self):
+        active_listings = getattr(self, 'active_lend_listings', None)
+        if active_listings is not None:
+            return next(
+                (
+                    item for item in active_listings
+                    if item.status in ('ACTIVE', 'RESERVED', 'ON_LOAN')
+                ),
+                active_listings[0] if active_listings else None,
+            )
+        listings = getattr(self, '_prefetched_objects_cache', {}).get('lend_listings')
+        if listings is not None:
+            return next(
+                (
+                    item for item in listings
+                    if item.status in ('ACTIVE', 'RESERVED', 'ON_LOAN')
+                ),
+                None,
+            )
+        return self.lend_listings.filter(
+            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+        ).first()
+
     @property
     def title(self):
-        listing = self._active_sale_listing()
+        listing = self._active_sale_listing() or self._active_lend_listing()
         return listing.title if listing else self.book_edition.book_work.title
 
     @property
     def description(self):
-        listing = self._active_sale_listing()
+        listing = self._active_sale_listing() or self._active_lend_listing()
         return listing.description if listing else self.book_edition.book_work.description
 
     @property
     def price(self):
-        listing = self._active_sale_listing()
-        return listing.price if listing else Decimal('0')
+        sale_listing = self._active_sale_listing()
+        if sale_listing is not None:
+            return sale_listing.price
+        lend_listing = self._active_lend_listing()
+        return lend_listing.rental_fee if lend_listing else Decimal('0')
 
     @property
     def condition_status(self):

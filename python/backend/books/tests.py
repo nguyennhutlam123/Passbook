@@ -15,6 +15,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from config.composite_admin import CompositeKeyAdmin
 from .models import Book, BookReservation, BorrowOrder, Payment
 from .serializers import (
+    BookSerializer,
     BookListSerializer,
     BookWriteSerializer,
     FavoriteBookSerializer,
@@ -31,13 +32,16 @@ from .services import (
 )
 from .sale_api_views import SaleListingDetailView, SaleListingInputSerializer
 from .commerce_api_views import (
+    BookReservationListCreateView,
+    CartItemInputSerializer,
+    CheckoutView,
     FakePaymentTransitionView,
     OrderDetailView,
     PaymentInputSerializer,
     PaymentListCreateView,
     RefundCreateView,
     ReturnActionView,
-    BorrowCheckoutInputSerializer,
+    CheckoutAddressInputSerializer,
     CheckoutInputSerializer,
     lend_listing_payload,
 )
@@ -265,6 +269,99 @@ class LegacyBookInputCompatibilityTests(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn('pickup_location_id', serializer.errors)
 
+    def test_legacy_book_input_defaults_to_buy_and_still_requires_price(self):
+        serializer = BookWriteSerializer(data={
+            'title': 'Legacy listing',
+            'price': '100000',
+            'condition_status': 'good',
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['listing_type'], 'BUY')
+
+    def test_borrow_listing_requires_existing_borrow_terms_without_sale_price(self):
+        serializer = BookWriteSerializer(data={
+            'listing_type': 'BORROW',
+            'title': 'Borrow listing',
+            'rental_fee': '0',
+            'condition_status': 'good',
+            'max_days': 14,
+            'shipping_paid_by': 'BORROWER',
+            'return_method': 'IN_PERSON',
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        invalid = BookWriteSerializer(data={
+            'listing_type': 'BORROW',
+            'title': 'Borrow listing',
+            'price': '100000',
+            'rental_fee': '0',
+            'condition_status': 'good',
+            'max_days': 14,
+            'shipping_paid_by': 'BORROWER',
+            'return_method': 'IN_PERSON',
+        })
+        self.assertFalse(invalid.is_valid())
+        self.assertIn('price', invalid.errors)
+
+    def test_borrow_listing_requires_terms_fields_supported_by_lite_schema(self):
+        serializer = BookWriteSerializer(data={
+            'listing_type': 'BORROW',
+            'title': 'Borrow listing',
+            'rental_fee': '0',
+            'condition_status': 'good',
+        })
+        self.assertFalse(serializer.is_valid())
+        for field in ('max_days', 'shipping_paid_by', 'return_method'):
+            self.assertIn(field, serializer.errors)
+
+
+class BuyBorrowSeparationTests(SimpleTestCase):
+    def test_cart_rejects_borrow_listing_type(self):
+        serializer = CartItemInputSerializer(data={
+            'listing_type': 'BORROW',
+            'listing_id': 12,
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('listing_type', serializer.errors)
+
+    def test_checkout_rejects_borrow_without_creating_an_order(self):
+        item = SimpleNamespace(sale_listing_id=None, lend_listing_id=12)
+        with self.assertRaises(ValidationError):
+            CheckoutView._checkout_line(item, SimpleNamespace(id=8))
+
+
+class ReservationApiValidationTests(SimpleTestCase):
+    def test_duplicate_active_reservation_returns_a_validation_error(self):
+        expires_at = (timezone.now() + timedelta(hours=1)).isoformat()
+        request = APIRequestFactory().post(
+            '/api/books/6/reservations/',
+            {'expires_at': expires_at},
+            format='json',
+        )
+        request.data = {'expires_at': expires_at}
+        request.user = SimpleNamespace(id=8, is_authenticated=True)
+        book = SimpleNamespace(owner_id=7, status='RESERVED')
+        book_manager = Mock()
+        reservations_manager = Mock()
+        reservations_manager.filter.return_value.exists.return_value = True
+
+        with patch('books.commerce_api_views.get_object_or_404', return_value=book), patch(
+            'books.commerce_api_views.Book.objects',
+            book_manager,
+        ), patch(
+            'books.commerce_api_views.BookReservation.objects',
+            reservations_manager,
+        ):
+            with self.assertRaisesMessage(
+                ValidationError,
+                'Sách đã có một yêu cầu đặt còn hiệu lực.',
+            ):
+                BookReservationListCreateView.post.__wrapped__(
+                    BookReservationListCreateView(),
+                    request,
+                    book_id=6,
+                )
+
 
 class BookListPayloadTests(SimpleTestCase):
     def test_list_serializer_excludes_detail_and_relationship_payloads(self):
@@ -290,6 +387,17 @@ class BookListPayloadTests(SimpleTestCase):
             BookListSerializer().fields['edition'].source,
             'book_edition.edition_name',
         )
+
+
+class BookStatusSerializationTests(SimpleTestCase):
+    def test_borrowed_book_is_not_reported_as_available(self):
+        book = SimpleNamespace(
+            status='ON_LOAN',
+            _active_sale_listing=lambda: None,
+            _active_lend_listing=lambda: SimpleNamespace(status='ON_LOAN'),
+        )
+
+        self.assertEqual(BookSerializer.get_status(book), 'on_loan')
 
 
 class BookIntentEndpointTests(SimpleTestCase):
@@ -558,38 +666,116 @@ class SaleListingInputTests(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertEqual(
             set(serializer.validated_data),
-            {'idempotency_key', 'shipping_address_snapshot', 'borrow'},
+            {
+                'idempotency_key',
+                'shipping_address_snapshot',
+                'payment_outcome',
+                'payment_method',
+            },
         )
+        self.assertEqual(serializer.validated_data['payment_outcome'], 'SUCCESS')
 
-    def test_borrow_checkout_dates_are_parsed_as_datetimes(self):
-        start = timezone.now() + timedelta(days=1)
-        end = start + timedelta(days=2)
-        serializer = BorrowCheckoutInputSerializer(data={
-            'expected_start_at': start.isoformat(),
-            'expected_return_at': end.isoformat(),
+    def test_checkout_payment_outcomes_are_limited_to_fake_provider_results(self):
+        for outcome in ('SUCCESS', 'FAILURE', 'CANCEL'):
+            with self.subTest(outcome=outcome):
+                serializer = CheckoutInputSerializer(data={
+                    'idempotency_key': f'checkout-{outcome.lower()}',
+                    'payment_outcome': outcome,
+                })
+                self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer = CheckoutInputSerializer(data={
+            'idempotency_key': 'checkout-invalid',
+            'payment_outcome': 'PAID',
         })
-
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-        self.assertLess(
-            serializer.validated_data['expected_start_at'],
-            serializer.validated_data['expected_return_at'],
-        )
-
-    def test_borrow_checkout_dates_are_required_and_validated(self):
-        serializer = BorrowCheckoutInputSerializer(data={
-            'expected_start_at': 'not-a-date',
-            'expected_return_at': timezone.now().isoformat(),
-        })
-
         self.assertFalse(serializer.is_valid())
-        self.assertIn('expected_start_at', serializer.errors)
+        self.assertIn('payment_outcome', serializer.errors)
 
+    def test_checkout_requires_valid_recipient_and_address(self):
+        for payload in (
+            {},
+            {
+                'recipient_name': 'Buyer',
+                'phone': '0900000000',
+                'address_line': '1 Example Street',
+            },
+            {
+                'recipient_name': ' ',
+                'phone': '0900000000',
+                'address_line': '1 Example Street',
+                'city': 'Ho Chi Minh City',
+            },
+        ):
+            with self.subTest(payload=payload):
+                serializer = CheckoutAddressInputSerializer(data=payload)
+                self.assertFalse(serializer.is_valid())
 
 class ReservationAuthorizationTests(SimpleTestCase):
+    def test_borrow_reservation_confirm_and_return_update_listing_without_order(self):
+        now = timezone.now()
+        book = SimpleNamespace(
+            id=5,
+            status='RESERVED',
+            updated_at=None,
+            sale_listings=Mock(),
+            save=Mock(),
+        )
+        reservation = SimpleNamespace(
+            id=14,
+            book_id=book.id,
+            book=book,
+            status='PENDING',
+            expires_at=now + timedelta(hours=1),
+            owner_id=7,
+            requester_id=8,
+            updated_at=None,
+            save=Mock(),
+        )
+        listing = SimpleNamespace(
+            status='RESERVED',
+            updated_at=None,
+            save=Mock(),
+        )
+        reservation_query = Mock()
+        reservation_query.get.return_value = reservation
+        reservation_manager = Mock()
+        reservation_manager.select_for_update.return_value = reservation_query
+        book_manager = Mock()
+        book_manager.select_for_update.return_value.get.return_value = book
+        lend_manager = Mock()
+        lend_manager.select_for_update.return_value.filter.return_value.order_by.return_value.first.return_value = listing
+        borrower = SimpleNamespace(id=8)
+
+        with patch.object(BookReservation, 'objects', reservation_manager), patch(
+            'books.services.Book.objects',
+            book_manager,
+        ), patch('books.services.LendListing.objects', lend_manager), patch(
+            'books.services._notify',
+        ), patch('books.services.BorrowOrder.objects.create') as create_borrow_order:
+            confirmed = transition_reservation.__wrapped__(
+                reservation.id,
+                SimpleNamespace(id=7),
+                'confirm',
+            )
+            self.assertEqual(confirmed.status, 'CONFIRMED')
+            self.assertEqual(listing.status, 'ON_LOAN')
+            self.assertEqual(book.status, 'ON_LOAN')
+
+            returned = transition_reservation.__wrapped__(
+                reservation.id,
+                borrower,
+                'complete',
+            )
+
+        self.assertEqual(returned.status, 'COMPLETED')
+        self.assertEqual(listing.status, 'ACTIVE')
+        self.assertEqual(book.status, 'AVAILABLE')
+        create_borrow_order.assert_not_called()
+
     def test_outsider_cannot_trigger_expiration_side_effects(self):
         now = timezone.now()
         reservation = SimpleNamespace(
             id=14,
+            book_id=5,
             status='PENDING',
             expires_at=now - timedelta(seconds=1),
             owner_id=7,
@@ -604,13 +790,17 @@ class ReservationAuthorizationTests(SimpleTestCase):
             save=Mock(),
         )
         query = Mock()
-        query.select_related.return_value = query
         query.get.return_value = reservation
         manager = Mock()
         manager.select_for_update.return_value = query
+        book_manager = Mock()
+        book_manager.select_for_update.return_value.get.return_value = reservation.book
         outsider = SimpleNamespace(id=99)
 
-        with patch.object(BookReservation, 'objects', manager):
+        with patch.object(BookReservation, 'objects', manager), patch(
+            'books.services.Book.objects',
+            book_manager,
+        ):
             with self.assertRaises(PermissionDenied):
                 transition_reservation.__wrapped__(14, outsider, 'confirm')
 
@@ -623,6 +813,7 @@ class ReservationAuthorizationTests(SimpleTestCase):
 
     def test_outsider_cannot_complete_another_users_reservation(self):
         reservation = SimpleNamespace(
+            book_id=5,
             status='CONFIRMED',
             expires_at=timezone.now() + timedelta(minutes=5),
             owner_id=7,
@@ -635,12 +826,16 @@ class ReservationAuthorizationTests(SimpleTestCase):
             ),
         )
         query = Mock()
-        query.select_related.return_value = query
         query.get.return_value = reservation
         manager = Mock()
         manager.select_for_update.return_value = query
+        book_manager = Mock()
+        book_manager.select_for_update.return_value.get.return_value = reservation.book
 
-        with patch.object(BookReservation, 'objects', manager):
+        with patch.object(BookReservation, 'objects', manager), patch(
+            'books.services.Book.objects',
+            book_manager,
+        ):
             with self.assertRaises(PermissionDenied):
                 transition_reservation.__wrapped__(
                     14,

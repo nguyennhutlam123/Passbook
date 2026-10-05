@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -35,6 +36,25 @@ PASSBOOK_ENVIRONMENT = os.environ.get(
     'PASSBOOK_ENVIRONMENT',
     'production',
 ).lower()
+PASSBOOK_OTP_MODE = os.environ.get('PASSBOOK_OTP_MODE', 'production').lower()
+PASSBOOK_DEV_OTP = os.environ.get('PASSBOOK_DEV_OTP', '123456')
+
+if PASSBOOK_OTP_MODE not in {'development', 'production'}:
+    raise ImproperlyConfigured(
+        'PASSBOOK_OTP_MODE must be development or production.',
+    )
+if PASSBOOK_OTP_MODE == 'development' and PASSBOOK_ENVIRONMENT not in {
+    'local', 'dev', 'development', 'test',
+}:
+    raise ImproperlyConfigured(
+        'Development OTP mode is only allowed in local/dev/test environments.',
+    )
+if PASSBOOK_OTP_MODE == 'development' and (
+    len(PASSBOOK_DEV_OTP) != 6 or not PASSBOOK_DEV_OTP.isdigit()
+):
+    raise ImproperlyConfigured(
+        'PASSBOOK_DEV_OTP must contain exactly six digits.',
+    )
 
 ALLOWED_HOSTS = [
     host.strip()

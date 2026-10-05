@@ -52,6 +52,24 @@ pip install -r requirements.txt
 
 Email xác nhận đơn hàng và email khi quản trị viên đổi trạng thái đơn vẫn dùng SMTP hiện có, nên cần `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL` cho các email đó. `EMAIL_TIMEOUT` (mặc định 10 giây) giới hạn thời gian chờ SMTP này. Render Free chặn outbound SMTP; việc chuyển OTP sang HTTPS không chuyển các email thông báo đơn hàng.
 
+## Tạo tài khoản kiểm thử
+
+`python manage.py create_test_accounts` tạo tối thiểu hai Buyer; có thể thêm một Admin bằng `--admin-email`. Tài khoản mới ở trạng thái `ACTIVE`, vì vậy chỉ dùng email test và không dùng mật khẩu thật. Mật khẩu được nhập tương tác (không truyền trong command line), xác nhận hai lần và lưu bằng Django password hasher. Email đã tồn tại sẽ bị bỏ qua, không bị cập nhật. Command chỉ chạy mặc định với `PASSBOOK_ENVIRONMENT=local/dev/test` và database host loopback; database khác cần cờ opt-in `--allow-production`. Kiểm tra mục tiêu bằng `--dry-run` trước khi ghi dữ liệu.
+
+```bash
+PASSBOOK_ENVIRONMENT=local python manage.py create_test_accounts \
+  --buyer-email buyer1@example.test \
+  --buyer-email buyer2@example.test \
+  --admin-email admin@example.test \
+  --dry-run
+```
+
+## Chế độ OTP local/test
+
+Trong local/dev/test, đặt `PASSBOOK_OTP_MODE=development` và `PASSBOOK_DEV_OTP=123456`. OTP dùng mã cố định này nhưng vẫn được hash và lưu vào `otp_verifications`; xác minh vẫn áp dụng expiration, attempt limit, cooldown/resend và trạng thái đã dùng. Không gọi email/SMS provider trong mode này. Cấu hình production bắt buộc `PASSBOOK_OTP_MODE=production` (đây cũng là mặc định); Django từ chối khởi động nếu bật development OTP trong môi trường production. Không đặt mode development trên Render.
+
+Để dùng OTP provider hiện có trong local hoặc production, đặt `PASSBOOK_OTP_MODE=production`. Brevo/API credentials chỉ được đọc khi gửi email theo production path.
+
 ## Chạy backend
 
 ```bash

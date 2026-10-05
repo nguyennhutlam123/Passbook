@@ -365,6 +365,8 @@ class OtpServiceTests(SimpleTestCase):
         OTP_MAX_ATTEMPTS=5,
         OTP_RESEND_COOLDOWN_SECONDS=60,
         OTP_MAX_RESENDS=5,
+        PASSBOOK_ENVIRONMENT='local',
+        PASSBOOK_OTP_MODE='production',
         DEFAULT_FROM_EMAIL='test@passbook.invalid',
     )
     def test_email_otp_is_hashed_and_not_in_api_serializer_output(self):
@@ -394,6 +396,202 @@ class OtpServiceTests(SimpleTestCase):
         })
         self.assertTrue(serializer.is_valid())
         self.assertNotIn('otp', serializer.data)
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='test',
+        PASSBOOK_OTP_MODE='development',
+        PASSBOOK_DEV_OTP='123456',
+        OTP_LIFETIME_SECONDS=300,
+        OTP_MAX_ATTEMPTS=5,
+    )
+    def test_development_email_otp_is_hashed_and_verifies_once_without_delivery(self):
+        from .services.otp import (
+            OtpVerificationError,
+            issue_otp,
+            verify_otp,
+        )
+
+        with patch('users.services.otp.secrets.randbelow') as generate_random, patch(
+            'users.services.otp.send_email',
+        ) as send_email, patch(
+            'users.services.otp._deliver_otp',
+        ) as deliver_otp:
+            row = issue_otp(
+                target='student@example.com',
+                channel='EMAIL',
+                purpose='REGISTER',
+            )
+            self.assertTrue(check_password('123456', row.otp_hash))
+            self.assertNotEqual(row.otp_hash, '123456')
+            generate_random.assert_not_called()
+            send_email.assert_not_called()
+            deliver_otp.assert_not_called()
+
+            with self.assertRaises(OtpVerificationError):
+                verify_otp(
+                    target=row.target,
+                    purpose='REGISTER',
+                    code='000000',
+                )
+            verified = verify_otp(
+                target=row.target,
+                purpose='REGISTER',
+                code='123456',
+            )
+            self.assertEqual(verified.status, 'VERIFIED')
+            with self.assertRaises(OtpVerificationError):
+                verify_otp(
+                    target=row.target,
+                    purpose='REGISTER',
+                    code='123456',
+                )
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='development',
+        PASSBOOK_OTP_MODE='development',
+        PASSBOOK_DEV_OTP='123456',
+        OTP_LIFETIME_SECONDS=300,
+    )
+    def test_development_email_otp_expires(self):
+        from .services.otp import OtpVerificationError, issue_otp, verify_otp
+
+        row = issue_otp(
+            target='expired@example.com',
+            channel='EMAIL',
+            purpose='REGISTER',
+        )
+        row.expires_at = timezone.now() - timedelta(seconds=1)
+        with self.assertRaises(OtpVerificationError):
+            verify_otp(
+                target=row.target,
+                purpose='REGISTER',
+                code='123456',
+            )
+        self.assertEqual(row.status, 'EXPIRED')
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='test',
+        PASSBOOK_OTP_MODE='development',
+        PASSBOOK_DEV_OTP='123456',
+        OTP_MAX_ATTEMPTS=2,
+    )
+    def test_development_email_otp_keeps_attempt_limit(self):
+        from .services.otp import OtpVerificationError, issue_otp, verify_otp
+
+        row = issue_otp(
+            target='attempt-limit@example.com',
+            channel='EMAIL',
+            purpose='REGISTER',
+        )
+        for _ in range(2):
+            with self.assertRaises(OtpVerificationError):
+                verify_otp(
+                    target=row.target,
+                    purpose='REGISTER',
+                    code='000000',
+                )
+        self.assertEqual(row.status, 'BLOCKED')
+        with self.assertRaises(OtpVerificationError):
+            verify_otp(
+                target=row.target,
+                purpose='REGISTER',
+                code='123456',
+            )
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='test',
+        PASSBOOK_OTP_MODE='development',
+        PASSBOOK_DEV_OTP='123456',
+    )
+    def test_development_phone_otp_does_not_call_sms_provider(self):
+        from .services.otp import issue_otp
+
+        with patch('users.services.otp.secrets.randbelow') as generate_random, patch(
+            'users.services.otp.import_string',
+        ) as load_sms_provider:
+            row = issue_otp(
+                target='+15550001111',
+                channel='PHONE',
+                purpose='LOGIN',
+            )
+        self.assertTrue(check_password('123456', row.otp_hash))
+        generate_random.assert_not_called()
+        load_sms_provider.assert_not_called()
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='test',
+        PASSBOOK_OTP_MODE='development',
+        PASSBOOK_DEV_OTP='123456',
+        OTP_RESEND_COOLDOWN_SECONDS=60,
+        OTP_MAX_RESENDS=1,
+        OTP_LIFETIME_SECONDS=300,
+    )
+    def test_development_resend_uses_same_code_and_keeps_cooldown_limits(self):
+        from .services.otp import OtpRateLimitError, issue_otp
+
+        with patch('users.services.otp.send_email') as send_email:
+            first = issue_otp(
+                target='student@example.com',
+                channel='EMAIL',
+                purpose='REGISTER',
+            )
+            self.assertTrue(check_password('123456', first.otp_hash))
+            with self.assertRaises(OtpRateLimitError):
+                issue_otp(
+                    target='student@example.com',
+                    channel='EMAIL',
+                    purpose='REGISTER',
+                )
+
+            first.updated_at -= timedelta(seconds=61)
+            second = issue_otp(
+                target='student@example.com',
+                channel='EMAIL',
+                purpose='REGISTER',
+            )
+            self.assertEqual(first.status, 'EXPIRED')
+            self.assertEqual(second.resend_count, 1)
+            self.assertTrue(check_password('123456', second.otp_hash))
+            send_email.assert_not_called()
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='production',
+        PASSBOOK_OTP_MODE='development',
+    )
+    def test_development_otp_is_rejected_in_production_environment(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from .services.otp import issue_otp
+
+        with patch('users.services.otp.send_email') as send_email:
+            with self.assertRaises(ImproperlyConfigured):
+                issue_otp(
+                    target='student@example.com',
+                    channel='EMAIL',
+                    purpose='REGISTER',
+                )
+        send_email.assert_not_called()
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='production',
+        PASSBOOK_OTP_MODE='production',
+        PASSBOOK_DEV_OTP='123456',
+    )
+    def test_production_mode_uses_random_otp_and_email_delivery(self):
+        from .services.otp import issue_otp
+
+        with patch(
+            'users.services.otp.secrets.randbelow',
+            return_value=456,
+        ), patch('users.services.otp.send_email') as send_email:
+            row = issue_otp(
+                target='student@example.com',
+                channel='EMAIL',
+                purpose='REGISTER',
+            )
+        self.assertTrue(check_password('000456', row.otp_hash))
+        self.assertFalse(check_password('123456', row.otp_hash))
+        send_email.assert_called_once()
 
     @override_settings(
         BREVO_API_KEY='test-api-key',
@@ -682,6 +880,83 @@ class OtpApiTests(SimpleTestCase):
             purpose='REGISTER',
             user=user,
         )
+
+    @override_settings(
+        PASSBOOK_ENVIRONMENT='test',
+        PASSBOOK_OTP_MODE='development',
+        PASSBOOK_DEV_OTP='123456',
+    )
+    def test_register_creates_hashed_development_otp_without_external_delivery(self):
+        from users.api_views import RegisterView
+        from users.services.otp import issue_otp
+        from users.otp_api_views import OtpVerifyView
+
+        user = SimpleNamespace(
+            id=82,
+            pk=82,
+            email='dev-register@example.test',
+            status='PENDING_VERIFICATION',
+            save=Mock(),
+        )
+        serializer = Mock()
+        serializer.save.return_value = user
+        registered_user = Mock()
+        registered_user.data = {'email': user.email}
+        user_manager = Mock()
+        user_manager.select_for_update.return_value.get.return_value = user
+        otp_manager = _OtpManager()
+        request = self.factory.post('/api/auth/register/', {
+            'name': 'Development Test Student',
+            'email': user.email,
+            'password': 'strong-test-password',
+        }, format='json')
+
+        with patch.object(RegisterView, 'post', RegisterView.post.__wrapped__), patch(
+            'users.api_views.RegisterSerializer',
+            return_value=serializer,
+        ), patch(
+            'users.api_views.RegisteredUserSerializer',
+            return_value=registered_user,
+        ), patch(
+            'users.api_views.issue_otp',
+            side_effect=issue_otp,
+        ), patch.object(
+            User,
+            'objects',
+            user_manager,
+        ), patch.object(
+            OtpVerification,
+            'objects',
+            otp_manager,
+        ), patch(
+            'users.services.otp.transaction.atomic',
+            return_value=nullcontext(),
+        ), patch(
+            'users.services.otp.send_email',
+        ) as send_email, patch(
+            'users.otp_api_views.get_object_or_404',
+            return_value=user,
+        ):
+            response = RegisterView.as_view()(request)
+            self.assertEqual(response.status_code, 202)
+            self.assertTrue(response.data['verification_required'])
+            self.assertEqual(len(otp_manager.rows), 1)
+            verification = otp_manager.rows[0]
+            self.assertEqual(verification.status, 'PENDING')
+            self.assertTrue(check_password('123456', verification.otp_hash))
+            send_email.assert_not_called()
+
+            verify_request = self.factory.post('/api/auth/verify-otp/', {
+                'target': user.email,
+                'purpose': 'REGISTER',
+                'otp': '123456',
+            }, format='json')
+            verify_response = OtpVerifyView.as_view()(verify_request)
+
+        self.assertEqual(verify_response.status_code, 200)
+        self.assertEqual(verify_response.data['user_id'], user.id)
+        self.assertEqual(user.status, 'ACTIVE')
+        self.assertEqual(verification.status, 'VERIFIED')
 
     def test_register_returns_service_unavailable_when_otp_delivery_fails(self):
         from users.api_views import RegisterView

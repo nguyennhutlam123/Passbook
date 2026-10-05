@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tìm sách - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell catalog-page">
+        <div class="catalog-search">
+            <label class="sr-only" for="catalog-query">Tìm sách</label>
+            <input id="catalog-query" type="search" placeholder="Tìm tên sách, môn học, mã môn hoặc mã ISBN..." autocomplete="off">
+            <button class="button button-primary" type="button" data-search-submit>🔍 Tìm kiếm</button>
+        </div>
+        <div class="catalog-layout">
+            <aside class="filter-panel" aria-label="Bộ lọc sách">
+                <div class="filter-heading">
+                    <h2>Bộ lọc</h2>
+                    <button class="button button-outline filter-close" type="button" data-filter-close>Đóng</button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-school">Trường</label>
+                    <input id="filter-school" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-faculty">Khoa</label>
+                    <input id="filter-faculty" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-major">Ngành</label>
+                    <input id="filter-major" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-subject">Môn học</label>
+                    <input id="filter-subject" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-author">Tác giả</label>
+                    <input id="filter-author" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-isbn">ISBN</label>
+                    <input id="filter-isbn" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-edition">Phiên bản</label>
+                    <input id="filter-edition" type="search" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-year">Năm xuất bản</label>
+                    <input id="filter-year" type="number" min="1" max="9999" inputmode="numeric">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-language">Ngôn ngữ</label>
+                    <select id="filter-language"><option value="">Tất cả ngôn ngữ</option></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-category">Danh mục</label>
+                    <select id="filter-category"><option value="">Tất cả danh mục</option></select>
+                </div>
+                <fieldset class="filter-fieldset">
+                    <legend class="form-label">Tình trạng</legend>
+                    <label><input type="radio" name="condition" value="new"> Mới</label>
+                    <label><input type="radio" name="condition" value="like_new"> Như mới</label>
+                    <label><input type="radio" name="condition" value="good"> Tốt</label>
+                    <label><input type="radio" name="condition" value="used"> Đã sử dụng</label>
+                </fieldset>
+                <div class="form-group">
+                    <label class="form-label" for="filter-min-price">Giá tối thiểu</label>
+                    <input id="filter-min-price" type="number" min="0" step="1000" placeholder="Không giới hạn">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="filter-max-price">Giá tối đa</label>
+                    <input id="filter-max-price" type="number" min="0" step="1000" placeholder="Không giới hạn">
+                </div>
+                <label class="sort-control">Sắp xếp
+                    <select id="sort-books">
+                        <option value="newest">Mới nhất</option>
+                        <option value="oldest">Cũ nhất</option>
+                        <option value="price-asc">Giá thấp → cao</option>
+                        <option value="price-desc">Giá cao → thấp</option>
+                    </select>
+                </label>
+                <button class="button button-primary" type="button" data-apply-filters>Lọc</button>
+                <p class="caption">Kết quả chỉ gồm tin đăng bán đang hoạt động.</p>
+                <button class="button button-outline" type="button" data-reset-filters>Xóa bộ lọc</button>
+            </aside>
+            <section class="catalog-results" aria-live="polite">
+                <div class="results-toolbar">
+                    <div>
+                        <button class="button button-outline filter-open" type="button" data-filter-open aria-expanded="false">Bộ lọc <span aria-hidden="true">⌄</span></button>
+                        <p class="caption" data-result-count>Đang tải sách...</p>
+                    </div>
+                </div>
+                <p class="form-error" role="alert" data-filter-error></p>
+                <div class="book-grid" data-catalog-grid></div>
+                <div class="empty-state" data-catalog-empty hidden>
+                    <span aria-hidden="true">🔍</span>
+                    <strong>Không tìm thấy tài liệu phù hợp.</strong>
+                    <p>Thử:</p>
+                    <ul class="empty-state__tips">
+                        <li>Kiểm tra lại tên sách</li>
+                        <li>Tìm bằng tên môn học</li>
+                        <li>Bỏ bớt bộ lọc</li>
+                    </ul>
+                    <button class="button button-outline" type="button" data-reset-empty>Xóa bộ lọc</button>
+                </div>
+                <nav class="pagination" data-pagination aria-label="Phân trang"></nav>
+            </section>
+        </div>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/books.js"></script>
+</body>
+</html>

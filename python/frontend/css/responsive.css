@@ -1,0 +1,230 @@
+@media (max-width: 768px) {
+    .book-grid,
+    .benefit-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hero__content {
+        padding-bottom: 3.5rem;
+        padding-top: 3.5rem;
+    }
+
+    .hero__search {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .hero__search .button {
+        width: 100%;
+    }
+
+    .seller-cta {
+        align-items: flex-start;
+        flex-direction: column;
+        margin-top: 2.5rem;
+    }
+
+    .navbar {
+        flex-wrap: wrap;
+        gap: 0;
+        min-height: 4rem;
+        padding: 0.75rem 0;
+    }
+
+    .nav-toggle {
+        background: transparent;
+        border-color: var(--border-color);
+        display: inline-flex;
+        font-size: 1.25rem;
+        min-height: 2.5rem;
+        padding: 0.375rem 0.625rem;
+    }
+
+    .nav-menu {
+        display: none;
+        flex-basis: 100%;
+        padding: 0.75rem 0 0.25rem;
+    }
+
+    .nav-menu.is-open {
+        display: grid;
+        gap: 0.5rem;
+    }
+
+    .books-page .nav-search,
+    .books-page .nav-links,
+    .books-page .nav-actions {
+        order: initial;
+    }
+
+    .books-page .nav-search {
+        margin-left: 0;
+        max-width: none;
+    }
+
+    .nav-links,
+    .nav-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .nav-links a,
+    .nav-actions a,
+    .nav-actions button,
+    .nav-user {
+        width: 100%;
+    }
+
+    .nav-more {
+        width: 100%;
+    }
+
+    .nav-more summary {
+        width: 100%;
+    }
+
+    .nav-more__panel {
+        box-shadow: none;
+        min-width: 0;
+        position: static;
+    }
+
+    .footer-grid {
+        grid-template-columns: 1fr;
+        padding: 2rem 0;
+    }
+
+    .sell-form__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .form-group--wide {
+        grid-column: auto;
+    }
+
+    .upload-previews {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .order-progress {
+        gap: 0.15rem;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .order-progress li {
+        font-size: 0.66rem;
+    }
+
+    .storefront-hero__inner {
+        display: block;
+        min-height: 0;
+        padding-bottom: 2.5rem;
+        padding-top: 3rem;
+    }
+
+    .storefront-hero__copy h1 {
+        font-size: clamp(2.8rem, 14vw, 4.2rem);
+    }
+
+    .storefront-search {
+        align-items: stretch;
+        flex-wrap: wrap;
+        padding: .55rem;
+    }
+
+    .storefront-search > span {
+        align-self: center;
+    }
+
+    .storefront-search input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .storefront-search .button {
+        flex-basis: 100%;
+        width: 100%;
+    }
+
+    .storefront-hero__art {
+        height: 18rem;
+        margin: 2rem auto 0;
+        max-width: 24rem;
+    }
+
+    .storefront-hero__art::before {
+        height: 18rem;
+        right: 0;
+        width: 18rem;
+    }
+
+    .book-stack--one {
+        height: 11rem;
+        right: 1rem;
+        width: 8rem;
+    }
+
+    .book-stack--two {
+        height: 12rem;
+        right: 5.3rem;
+        top: 2rem;
+        width: 8.5rem;
+    }
+
+    .book-stack--main {
+        height: 14rem;
+        left: 1.5rem;
+        top: 3rem;
+        width: 10rem;
+    }
+
+    .book-stack--main span {
+        font-size: 1.6rem;
+        padding-bottom: 2rem;
+    }
+
+    .hero-sticker {
+        height: 4.3rem;
+        right: 0;
+        top: 10rem;
+        width: 4.3rem;
+    }
+
+    .collection-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: .8rem;
+    }
+
+    .collection-section,
+    .catalog-navigation {
+        padding-bottom: 3rem;
+        padding-top: 2.8rem;
+    }
+
+    .catalog-navigation {
+        padding-bottom: .5rem;
+    }
+
+    .collection-section--borrow {
+        padding-top: .5rem;
+    }
+
+    .how-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .how-grid strong {
+        margin-top: 1rem;
+    }
+
+    .seller-cta--storefront {
+        align-items: flex-start;
+        margin-bottom: 3rem;
+        padding: 2.5rem 1.5rem;
+    }
+
+    .seller-cta--storefront .button-light {
+        margin: 1rem 0 0;
+    }
+}

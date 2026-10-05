@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sách yêu thích - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell" data-favorites-page>
+        <section class="section-heading">
+            <div><span class="eyebrow">Tài khoản</span><h1>Sách yêu thích</h1></div>
+            <a class="button button-outline" href="books.html">Khám phá sách</a>
+        </section>
+        <p class="form-error" role="alert" data-favorites-error></p>
+        <div class="book-grid" data-favorites-list aria-live="polite"><p class="loading-state">Đang tải sách yêu thích...</p></div>
+        <div data-favorites-pagination></div>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script><script src="js/core/errors.js"></script><script src="js/core/auth.js"></script><script src="js/core/router.js"></script><script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script><script src="js/components/books/book-card.js"></script>
+    <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/favorites-api.js"></script><script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script><script src="js/favorites.js"></script>
+</body>
+</html>

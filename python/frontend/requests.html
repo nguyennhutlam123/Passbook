@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yêu cầu sách - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell" data-requests-page>
+        <section class="requests-intro">
+            <div><span class="eyebrow">Kết nối cộng đồng</span><h1>Yêu cầu sách</h1><p class="text-secondary">Đăng sách bạn đang tìm mua, muốn mượn hoặc có nhu cầu bán.</p></div>
+            <button class="button button-outline" type="button" data-request-refresh>Tải lại</button>
+        </section>
+        <div class="requests-layout">
+            <form class="workspace-checkout request-form" data-request-form>
+                <span class="eyebrow">Bắt đầu kết nối</span>
+                <h2 data-request-form-title>Tạo yêu cầu mới</h2>
+                <label class="form-label" for="request-type">Bạn đang cần gì?</label>
+                <select class="form-control" id="request-type" name="request_type">
+                    <option value="BUY">Tìm mua sách</option>
+                    <option value="BORROW">Tìm mượn sách</option>
+                    <option value="SELL_INTENT">Muốn bán sách</option>
+                </select>
+                <label class="form-label" for="request-title">Tên sách hoặc từ khóa *</label>
+                <input class="form-control" id="request-title" name="title_keyword" maxlength="500" placeholder="Ví dụ: Giải tích 1, STA203..." required>
+                <label class="form-label" for="request-description">Mô tả thêm</label>
+                <textarea class="form-control" id="request-description" name="description" maxlength="5000" rows="4" placeholder="Phiên bản, môn học, thời gian cần..."></textarea>
+                <div class="form-group" data-request-price-group>
+                    <label class="form-label" for="request-price" data-request-price-label>Ngân sách tối đa (VND)</label>
+                    <input class="form-control" id="request-price" name="price" type="number" min="0" step="1000" inputmode="numeric" placeholder="Không bắt buộc">
+                </div>
+                <div class="form-group" data-request-condition-group>
+                    <label class="form-label" for="request-condition">Tình trạng mong muốn</label>
+                    <select class="form-control" id="request-condition" name="condition_preference">
+                        <option value="">Không yêu cầu</option>
+                        <option value="new">Mới</option>
+                        <option value="like_new">Như mới</option>
+                        <option value="good">Tốt</option>
+                        <option value="used">Đã sử dụng</option>
+                    </select>
+                </div>
+                <label class="form-label" for="request-expires">Ngày hết hạn (không bắt buộc)</label>
+                <input class="form-control" id="request-expires" name="expires_at" type="datetime-local">
+                <div class="request-form__actions">
+                    <button class="button button-primary" type="submit">Đăng yêu cầu</button>
+                    <button class="button button-outline" type="button" data-request-edit-cancel hidden>Hủy sửa</button>
+                </div>
+                <p class="form-error" role="alert" data-request-error></p>
+            </form>
+            <section class="requests-feed">
+                <section class="workspace-section request-group">
+                    <div class="section-heading"><div><span class="eyebrow">Cá nhân</span><h2>Yêu cầu của bạn</h2></div></div>
+                    <div class="request-list" data-own-request-list><p class="loading-state">Đang tải yêu cầu...</p></div>
+                </section>
+                <section class="workspace-section request-group">
+                    <div class="section-heading"><div><span class="eyebrow">Cộng đồng</span><h2>Đang cần sách</h2></div></div>
+                    <div class="request-filters" role="group" aria-label="Lọc loại yêu cầu">
+                        <button class="button is-active" type="button" data-request-filter="all" aria-pressed="true">Tất cả</button>
+                        <button class="button button-outline" type="button" data-request-filter="BUY" aria-pressed="false">Tìm mua</button>
+                        <button class="button button-outline" type="button" data-request-filter="BORROW" aria-pressed="false">Tìm mượn</button>
+                        <button class="button button-outline" type="button" data-request-filter="SELL_INTENT" aria-pressed="false">Muốn bán</button>
+                    </div>
+                    <div class="request-list" data-community-request-list><p class="loading-state">Đang tải yêu cầu...</p></div>
+                    <div data-request-pagination></div>
+                </section>
+            </section>
+        </div>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/books-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/requests.js"></script>
+</body>
+</html>

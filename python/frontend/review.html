@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đánh giá sách - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell review-page" data-review-page>
+        <div class="page-intro">
+            <span class="eyebrow">Chia sẻ trải nghiệm</span>
+            <h1>Đánh giá sách</h1>
+            <p class="text-secondary">Đánh giá chỉ mở khi giao dịch đã hoàn tất.</p>
+        </div>
+        <section class="review-order" data-review-order aria-live="polite">
+            <p class="loading-state">Đang kiểm tra điều kiện đánh giá...</p>
+        </section>
+        <form class="review-form workspace-checkout" data-review-form hidden>
+            <fieldset class="rating-picker">
+                <legend class="form-label">Bạn đánh giá thế nào? *</legend>
+                <div role="group" aria-label="Chọn từ 1 đến 5 sao" data-rating-options>
+                    <button type="button" data-rating="1" aria-label="1 sao" aria-pressed="false">☆</button>
+                    <button type="button" data-rating="2" aria-label="2 sao" aria-pressed="false">☆</button>
+                    <button type="button" data-rating="3" aria-label="3 sao" aria-pressed="false">☆</button>
+                    <button type="button" data-rating="4" aria-label="4 sao" aria-pressed="false">☆</button>
+                    <button type="button" data-rating="5" aria-label="5 sao" aria-pressed="false">☆</button>
+                </div>
+                <span class="rating-picker__value" data-rating-value aria-live="polite">Chọn số sao</span>
+                <input type="hidden" name="rating" value="">
+            </fieldset>
+            <p class="caption" data-review-editing hidden>Bạn đã gửi đánh giá cho giao dịch này. Có thể cập nhật nội dung bên dưới.</p>
+            <label class="form-label" for="review-comment">Nhận xét</label>
+            <textarea class="form-control" id="review-comment" name="comment" maxlength="5000" placeholder="Chia sẻ nhận xét của bạn"></textarea>
+            <p class="form-error" role="alert" data-review-error></p>
+            <button class="button button-primary" type="submit" data-review-submit>Gửi đánh giá</button>
+        </form>
+        <section class="review-history" data-review-history aria-live="polite"></section>
+        <a class="button button-outline" href="orders.html">Quay lại đơn hàng</a>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/orders-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/review.js"></script>
+</body>
+</html>

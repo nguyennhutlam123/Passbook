@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - PassBook</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell" data-admin-dashboard>
+        <section class="page-heading">
+            <span class="eyebrow">Quản trị hệ thống</span>
+            <h1>Admin Dashboard</h1>
+            <p class="caption">Theo dõi dữ liệu quản trị được cung cấp bởi Dashboard API.</p>
+            <nav class="admin-dashboard-nav" aria-label="Các khu vực quản trị" data-admin-navigation>
+                <a href="#overview" data-section="overview">Tổng quan</a>
+                <a href="#users" data-section="users">Tài khoản</a>
+                <a href="#marketplace" data-section="marketplace">Marketplace</a>
+                <a href="#reservations" data-section="reservations">Đặt sách</a>
+                <a href="#borrow" data-section="borrow">Mượn sách</a>
+                <a href="#commerce" data-section="commerce">Đơn hàng</a>
+                <a href="#payments" data-section="payments">Thanh toán</a>
+                <a href="#shipping" data-section="shipping">Vận chuyển</a>
+                <a href="#returns" data-section="returns">Trả hàng / hoàn tiền</a>
+                <a href="#reports" data-section="reports">Báo cáo</a>
+                <a href="#messaging" data-section="messaging">Tin nhắn</a>
+                <a href="#notifications" data-section="notifications">Thông báo</a>
+                <a href="#reviews" data-section="reviews">Đánh giá</a>
+                <a href="#favorites" data-section="favorites">Yêu thích</a>
+                <a href="#demand" data-section="demand">Nhu cầu</a>
+                <a href="#catalog" data-section="catalog">Danh mục</a>
+                <a href="#analytics" data-section="analytics">Phân tích</a>
+            </nav>
+        </section>
+        <section class="workspace-section admin-dashboard-content" aria-live="polite">
+            <div data-admin-view><p class="loading-state">Đang tải Dashboard...</p></div>
+        </section>
+        <section class="workspace-section" data-payment-simulator hidden>
+            <h2>Payment simulator (local/test only)</h2>
+            <p class="caption">Dùng ID thanh toán/hoàn tiền lấy từ giao dịch; backend vẫn kiểm tra quyền quản trị và cờ fake provider.</p>
+            <form data-fake-payment-form>
+                <label class="form-label" for="fake-payment-id">Payment ID</label>
+                <input class="form-control" id="fake-payment-id" name="payment_id" type="number" min="1" required>
+                <label class="form-label" for="fake-payment-status">Trạng thái</label>
+                <select class="form-control" id="fake-payment-status" name="status">
+                    <option value="PAID">Thành công</option><option value="FAILED">Thất bại</option>
+                    <option value="CANCELLED">Hủy</option><option value="PENDING">Đặt lại pending</option>
+                </select>
+                <button class="button button-outline" type="submit">Chuyển trạng thái thanh toán</button>
+            </form>
+            <form data-fake-refund-form>
+                <label class="form-label" for="fake-refund-id">Refund ID</label>
+                <input class="form-control" id="fake-refund-id" name="refund_id" type="number" min="1" required>
+                <label class="form-label" for="fake-refund-status">Trạng thái</label>
+                <select class="form-control" id="fake-refund-status" name="status">
+                    <option value="COMPLETED">Hoàn tất</option><option value="FAILED">Thất bại</option>
+                </select>
+                <button class="button button-outline" type="submit">Chuyển trạng thái hoàn tiền</button>
+            </form>
+            <p class="form-error" role="alert" data-fake-payment-error></p>
+        </section>
+        <p class="form-error" role="alert" data-admin-error></p>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="../js/core/storage.js"></script><script src="../js/core/errors.js"></script>
+    <script src="../js/core/auth.js"></script><script src="../js/core/router.js"></script><script src="../js/core/guards.js"></script>
+    <script src="../js/components/common/common.js"></script>
+    <script src="../js/api.js"></script><script src="../js/api/utils.js"></script><script src="../js/api/auth-api.js"></script>
+    <script src="../js/api/notifications-api.js"></script><script src="../js/api/payments-api.js"></script>
+    <script src="../js/api/admin-api.js?v=payment-revenue-1"></script>
+    <script src="../js/main.js"></script><script src="../js/admin.js?v=shipment-order-sync-1"></script><script src="../js/admin-payment-simulator.js"></script>
+</body>
+</html>

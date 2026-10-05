@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trang cá nhân công khai - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell public-profile-page" data-public-profile>
+        <p class="caption"><a href="books.html">← Quay lại danh sách sách</a></p>
+        <section class="profile-header public-profile-header">
+            <span class="profile-avatar avatar" data-public-avatar>PB</span>
+            <div>
+                <h1 data-public-name>Đang tải trang cá nhân...</h1>
+                <p data-public-university></p>
+                <p class="caption"><span data-public-listing-count>0</span> tin đang hiển thị</p>
+            </div>
+        </section>
+        <section class="profile-listings">
+            <div class="section-heading">
+                <div><span class="eyebrow">Tin đăng công khai</span><h2>Sách người này đã đăng</h2></div>
+            </div>
+            <div class="public-profile-tabs" role="group" aria-label="Lọc tin đăng">
+                <button class="button button-outline is-active" type="button" data-profile-type="ALL">Tất cả</button>
+                <button class="button button-outline" type="button" data-profile-type="SALE">Đang bán</button>
+                <button class="button button-outline" type="button" data-profile-type="BORROW">Cho mượn</button>
+            </div>
+            <p class="form-error" role="alert" data-profile-error></p>
+            <div class="book-grid" data-profile-books aria-live="polite"></div>
+            <nav class="pagination" data-profile-pagination aria-label="Phân trang tin đăng"></nav>
+        </section>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/components/books/book-card.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/users-api.js?v=public-profile"></script>
+    <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/reservations-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/books.js"></script>
+    <script src="js/public-profile.js"></script>
+</body>
+</html>

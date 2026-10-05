@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý tài khoản - PassBook</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell" data-admin-users>
+        <section class="page-heading">
+            <span class="eyebrow">Quản trị</span><h1>Quản lý tài khoản</h1>
+            <nav class="admin-nav"><a href="index.html">Tổng quan</a><a href="reports.html">Báo cáo</a><a href="users.html">Tài khoản</a></nav>
+        </section>
+        <section class="workspace-section">
+            <h2>Tài khoản</h2>
+            <form class="workspace-checkout" data-user-search>
+                <label class="form-label" for="admin-user-search">Tìm theo tên, email hoặc điện thoại</label>
+                <input class="form-control" id="admin-user-search" name="search" type="search" maxlength="254">
+                <label class="form-label" for="admin-user-filter-status">Trạng thái</label>
+                <select class="form-control" id="admin-user-filter-status" name="status">
+                    <option value="">Tất cả</option><option value="ACTIVE">Đang hoạt động</option>
+                    <option value="BLOCKED">Đã khóa</option><option value="PENDING_VERIFICATION">Chờ xác minh</option>
+                </select>
+                <label class="form-label" for="admin-user-filter-role">Vai trò</label>
+                <select class="form-control" id="admin-user-filter-role" name="role">
+                    <option value="">Tất cả</option><option value="STUDENT">Sinh viên</option><option value="ADMIN">Quản trị viên</option>
+                </select>
+                <button class="button button-primary" type="submit">Tìm tài khoản</button>
+            </form>
+            <div class="report-list" data-admin-user-results aria-live="polite"></div>
+        </section>
+        <form class="workspace-checkout" data-user-lookup>
+            <h2>Tra cứu bằng ID</h2>
+            <p class="caption">Tra cứu ID trực tiếp để xem và xử lý vi phạm tài khoản.</p>
+            <label class="form-label" for="admin-user-id">ID tài khoản</label>
+            <input class="form-control" id="admin-user-id" name="user_id" type="number" min="1" required>
+            <button class="button button-primary" type="submit">Tải vi phạm</button>
+        </form>
+        <section class="workspace-section">
+            <h2>Trạng thái tài khoản</h2>
+            <form data-user-status-form>
+                <label class="form-label" for="account-status">Trạng thái</label>
+                <select class="form-control" id="account-status" name="status">
+                    <option value="ACTIVE">ACTIVE</option><option value="BLOCKED">BLOCKED</option>
+                    <option value="PENDING_VERIFICATION">PENDING_VERIFICATION</option>
+                </select>
+                <button class="button button-outline" type="submit">Cập nhật trạng thái</button>
+            </form>
+        </section>
+        <section class="workspace-section">
+            <h2>Ghi nhận vi phạm</h2>
+            <form class="workspace-checkout" data-violation-form>
+                <label class="form-label" for="violation-type">Loại vi phạm</label>
+                <input class="form-control" id="violation-type" name="violation_type" maxlength="50" required>
+                <label class="form-label" for="violation-reason">Lý do</label>
+                <input class="form-control" id="violation-reason" name="reason" maxlength="255" required>
+                <label class="form-label" for="violation-severity">Mức độ</label>
+                <input class="form-control" id="violation-severity" name="severity" maxlength="20" required>
+                <label class="form-label" for="violation-description">Mô tả</label>
+                <textarea class="form-control" id="violation-description" name="description"></textarea>
+                <button class="button button-primary" type="submit">Tạo vi phạm</button>
+            </form>
+        </section>
+        <div class="report-list" data-user-violations></div>
+        <p class="form-error" role="alert" data-user-admin-error></p>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="../js/core/storage.js"></script><script src="../js/core/errors.js"></script>
+    <script src="../js/core/auth.js"></script><script src="../js/core/router.js"></script><script src="../js/core/guards.js"></script>
+    <script src="../js/components/common/common.js"></script>
+    <script src="../js/api.js"></script><script src="../js/api/utils.js"></script><script src="../js/api/auth-api.js"></script>
+    <script src="../js/api/notifications-api.js"></script><script src="../js/api/admin-api.js"></script>
+    <script src="../js/main.js"></script><script src="../js/admin-users.js"></script>
+</body>
+</html>

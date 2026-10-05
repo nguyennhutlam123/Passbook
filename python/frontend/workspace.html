@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giao dịch của tôi - PassBook</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/workspace.css">
+</head>
+<body>
+    <header class="site-header" data-site-header></header>
+    <main class="page-shell workspace-page">
+        <section class="page-intro">
+            <span class="eyebrow">Tài khoản</span>
+            <h1>Giao dịch của tôi</h1>
+            <p class="text-secondary">Mở riêng giỏ hàng, đơn hàng hoặc phiếu mượn để theo dõi từng giao dịch.</p>
+        </section>
+        <nav class="transaction-hub" aria-label="Các trang giao dịch">
+            <a class="transaction-hub__card" href="cart.html"><strong>Giỏ hàng</strong><span>Xem giỏ và hoàn tất đặt hàng.</span></a>
+            <a class="transaction-hub__card" href="orders.html"><strong>Đơn hàng</strong><span>Theo dõi đơn mua và tiến trình giao hàng.</span></a>
+            <a class="transaction-hub__card" href="borrow-tickets.html"><strong>Phiếu mượn</strong><span>Quản lý yêu cầu mượn và trả sách.</span></a>
+        </nav>
+    </main>
+    <footer class="site-footer" data-site-footer></footer>
+    <script src="js/core/storage.js"></script>
+    <script src="js/core/errors.js"></script>
+    <script src="js/core/auth.js"></script>
+    <script src="js/core/router.js"></script>
+    <script src="js/core/guards.js"></script>
+    <script src="js/components/common/common.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/api/utils.js"></script>
+    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

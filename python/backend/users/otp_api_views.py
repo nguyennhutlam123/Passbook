@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import OtpVerification, User
-from .services import issue_otp, verify_otp
+from .services import OtpDisabledError, issue_otp, verify_otp
 
 OTP_PURPOSES = {
     'REGISTER',
@@ -80,6 +80,9 @@ def _validate_target(value):
 
 class OtpRequestView(APIView):
     def post(self, request):
+        if not settings.OTP_ENABLED:
+            raise OtpDisabledError()
+
         serializer = OtpResendSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         target = serializer.validated_data['target']
@@ -140,6 +143,9 @@ class OtpRequestView(APIView):
 
 class OtpVerifyView(APIView):
     def post(self, request):
+        if not settings.OTP_ENABLED:
+            raise OtpDisabledError()
+
         serializer = OtpVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -224,6 +230,11 @@ class OtpVerifyView(APIView):
 
 class ForgotPasswordView(APIView):
     def post(self, request):
+        if not settings.OTP_ENABLED:
+            raise OtpDisabledError(
+                'Đặt lại mật khẩu hiện tạm thời không khả dụng.',
+            )
+
         serializer = TargetInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         target = serializer.validated_data['target']
@@ -257,6 +268,11 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 class ResetPasswordView(APIView):
     def post(self, request):
+        if not settings.OTP_ENABLED:
+            raise OtpDisabledError(
+                'Đặt lại mật khẩu hiện tạm thời không khả dụng.',
+            )
+
         serializer = ResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -315,6 +331,22 @@ class ChangeContactRequestView(APIView):
             pk=user.pk,
         ).exists():
             raise serializers.ValidationError({'target': 'Thông tin liên hệ đã được sử dụng.'})
+
+        if not settings.OTP_ENABLED:
+            setattr(user, field_name, target.lower() if channel == 'email' else target)
+            user.updated_at = timezone.now()
+            try:
+                with transaction.atomic():
+                    user.save(update_fields=[field_name, 'updated_at'])
+            except IntegrityError as exc:
+                raise serializers.ValidationError(
+                    {'target': 'Thông tin liên hệ đã được sử dụng.'},
+                ) from exc
+            return Response({
+                'detail': 'Thông tin liên hệ đã được cập nhật.',
+                'otp_enabled': False,
+            })
+
         issue_otp(
             target=target,
             channel='EMAIL' if channel == 'email' else 'PHONE',
@@ -322,6 +354,14 @@ class ChangeContactRequestView(APIView):
             user=user,
         )
         return Response(
-            {'detail': 'Mã xác minh sẽ được gửi đến thông tin liên hệ mới.'},
+            {
+                'detail': 'Mã xác minh sẽ được gửi đến thông tin liên hệ mới.',
+                'otp_enabled': True,
+            },
             status=status.HTTP_202_ACCEPTED,
         )
+
+
+class OtpStatusView(APIView):
+    def get(self, request):
+        return Response({'otp_enabled': settings.OTP_ENABLED})

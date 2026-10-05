@@ -32,6 +32,7 @@
         logout,
         refresh: (refresh) => client.post("/auth/token/refresh/", {refresh}),
         currentUser,
+        otpStatus: () => client.get("/auth/otp-status/"),
         profile: () => client.get("/auth/profile/"),
         updateProfile: (data) => client.patch("/auth/profile/", data),
         changePassword: (data) => client.post("/auth/change-password/", data),

@@ -35,22 +35,34 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        issue_otp(
-            target=user.email,
-            channel='EMAIL',
-            purpose='REGISTER',
-            user=user,
-        )
+        if settings.OTP_ENABLED:
+            issue_otp(
+                target=user.email,
+                channel='EMAIL',
+                purpose='REGISTER',
+                user=user,
+            )
+        else:
+            user.status = 'ACTIVE'
+            user.updated_at = timezone.now()
+            user.save(update_fields=['status', 'updated_at'])
         return Response(
             {
-                'message': 'Đăng ký thành công. Vui lòng xác minh email.',
-                'verification_required': True,
+                'message': (
+                    'Đăng ký thành công. Vui lòng xác minh email.'
+                    if settings.OTP_ENABLED
+                    else 'Đăng ký thành công. Bạn có thể đăng nhập.'
+                ),
+                'otp_enabled': settings.OTP_ENABLED,
+                'verification_required': settings.OTP_ENABLED,
                 'target': user.email,
-                'otp_expires_in_seconds': settings.OTP_LIFETIME_SECONDS,
-                'otp_resend_after_seconds': settings.OTP_RESEND_COOLDOWN_SECONDS,
+                **({
+                    'otp_expires_in_seconds': settings.OTP_LIFETIME_SECONDS,
+                    'otp_resend_after_seconds': settings.OTP_RESEND_COOLDOWN_SECONDS,
+                } if settings.OTP_ENABLED else {}),
                 'user': RegisteredUserSerializer(user).data,
             },
-            status=status.HTTP_202_ACCEPTED,
+            status=status.HTTP_202_ACCEPTED if settings.OTP_ENABLED else status.HTTP_201_CREATED,
         )
 
 
@@ -76,13 +88,13 @@ class LoginView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        if user.status == 'PENDING_VERIFICATION':
+        if user.status == 'PENDING_VERIFICATION' and settings.OTP_ENABLED:
             return Response(
                 {'detail': 'Vui lòng xác minh tài khoản trước khi đăng nhập.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if user.status != 'ACTIVE':
+        if user.status not in ('ACTIVE', 'PENDING_VERIFICATION'):
             return Response(
                 {'detail': 'Tài khoản không hoạt động.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -94,8 +106,13 @@ class LoginView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
+        if user.status == 'PENDING_VERIFICATION':
+            user.status = 'ACTIVE'
+            user.updated_at = timezone.now()
+            user.save(update_fields=['status', 'updated_at'])
+
         otp_channel = serializer.validated_data.get('otp_channel')
-        if otp_channel:
+        if otp_channel and settings.OTP_ENABLED:
             target = user.email if otp_channel == 'EMAIL' else user.phone
             if not target:
                 raise serializers.ValidationError({

@@ -113,6 +113,8 @@ OTP_RESEND_WINDOW_SECONDS = int(
 OTP_RESET_TOKEN_LIFETIME_SECONDS = int(
     os.environ.get('OTP_RESET_TOKEN_LIFETIME_SECONDS', '600'),
 )
+OTP_ENABLED = os.environ.get('OTP_ENABLED', 'false').lower() == 'true'
+
 PASSBOOK_SMS_DELIVERY_BACKEND = os.environ.get(
     'PASSBOOK_SMS_DELIVERY_BACKEND',
     '',

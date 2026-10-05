@@ -199,6 +199,7 @@ class DjangoSMTPEmailServiceTests(SimpleTestCase):
                 )
 
 
+@override_settings(OTP_ENABLED=True)
 class OtpServiceTests(SimpleTestCase):
     def setUp(self):
         self.manager = _OtpManager()
@@ -324,6 +325,30 @@ class OtpServiceTests(SimpleTestCase):
         self.assertNotEqual(row.otp_hash, '000456')
         send_email.assert_called_once()
         self.assertIn('000456', send_email.call_args.kwargs['text'])
+
+    @override_settings(OTP_ENABLED=False)
+    def test_disabled_otp_never_creates_records_or_calls_delivery(self):
+        from .services.otp import OtpDisabledError, issue_otp, verify_otp
+
+        with patch('users.services.otp.secrets.randbelow') as generate_random, patch(
+            'users.services.otp._deliver_otp',
+        ) as deliver_otp:
+            with self.assertRaises(OtpDisabledError):
+                issue_otp(
+                    target='student@example.com',
+                    channel='EMAIL',
+                    purpose='REGISTER',
+                )
+            with self.assertRaises(OtpDisabledError):
+                verify_otp(
+                    target='student@example.com',
+                    purpose='REGISTER',
+                    code='654321',
+                )
+
+        self.assertEqual(self.manager.rows, [])
+        generate_random.assert_not_called()
+        deliver_otp.assert_not_called()
 
     @override_settings(OTP_MAX_ATTEMPTS=2)
     def test_random_email_otp_expires_and_attempt_limit_blocks_verification(self):
@@ -596,9 +621,195 @@ class OtpServiceTests(SimpleTestCase):
         self.assertFalse(any(re.search(r'\b654321\b', message) for message in records))
 
 
+@override_settings(OTP_ENABLED=True)
 class OtpApiTests(SimpleTestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
+
+    @override_settings(OTP_ENABLED=False)
+    def test_disabled_otp_endpoints_return_unavailable_without_service_calls(self):
+        from .otp_api_views import (
+            ForgotPasswordView,
+            OtpRequestView,
+            OtpStatusView,
+            OtpVerifyView,
+            ResetPasswordView,
+        )
+
+        with patch('users.otp_api_views.issue_otp') as issue, patch(
+            'users.otp_api_views.verify_otp',
+        ) as verify:
+            status_response = OtpStatusView.as_view()(self.factory.get(
+                '/api/auth/otp-status/',
+            ))
+            request_response = OtpRequestView.as_view()(self.factory.post(
+                '/api/auth/resend-otp/',
+                {'target': 'student@example.test', 'purpose': 'REGISTER'},
+                format='json',
+            ))
+            verify_response = OtpVerifyView.as_view()(self.factory.post(
+                '/api/auth/verify-otp/',
+                {
+                    'target': 'student@example.test',
+                    'purpose': 'REGISTER',
+                    'otp': '654321',
+                },
+                format='json',
+            ))
+            forgot_response = ForgotPasswordView.as_view()(self.factory.post(
+                '/api/auth/forgot-password/',
+                {'target': 'student@example.test'},
+                format='json',
+            ))
+            reset_response = ResetPasswordView.as_view()(self.factory.post(
+                '/api/auth/reset-password/',
+                {'reset_token': 'anything', 'new_password': 'New-password-123'},
+                format='json',
+            ))
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.data, {'otp_enabled': False})
+        for response in (
+            request_response,
+            verify_response,
+            forgot_response,
+            reset_response,
+        ):
+            self.assertEqual(response.status_code, 503)
+        self.assertIn('không khả dụng', forgot_response.data['detail'])
+        issue.assert_not_called()
+        verify.assert_not_called()
+
+    @override_settings(OTP_ENABLED=False)
+    def test_password_login_ignores_otp_request_and_does_not_call_otp_service(self):
+        from .api_views import LoginView
+
+        user = SimpleNamespace(
+            id=81,
+            email='student@example.test',
+            phone=None,
+            status='ACTIVE',
+            password_hash='stored-hash',
+            save=Mock(),
+        )
+        class FakeRefresh:
+            access_token = 'access-token'
+
+            def __str__(self):
+                return 'refresh-token'
+
+        request = self.factory.post('/api/auth/login/', {
+            'email': user.email,
+            'password': 'valid-password',
+            'otp_channel': 'EMAIL',
+        }, format='json')
+        with patch.object(
+            User.objects,
+            'filter',
+            return_value=SimpleNamespace(first=lambda: user),
+        ), patch(
+            'users.api_views.check_password',
+            return_value=True,
+        ), patch(
+            'users.api_views.RefreshToken.for_user',
+            return_value=FakeRefresh(),
+        ), patch(
+            'users.api_views.RegisteredUserSerializer',
+            return_value=SimpleNamespace(data={'id': user.id}),
+        ), patch('users.api_views.issue_otp') as issue:
+            response = LoginView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['access'], 'access-token')
+        self.assertEqual(response.data['refresh'], 'refresh-token')
+        issue.assert_not_called()
+
+    @override_settings(OTP_ENABLED=False)
+    def test_pending_user_is_not_activated_until_password_authentication_succeeds(self):
+        from .api_views import LoginView
+
+        user = SimpleNamespace(
+            id=83,
+            email='pending@example.test',
+            phone=None,
+            status='PENDING_VERIFICATION',
+            password_hash='stored-hash',
+            save=Mock(),
+        )
+        request = self.factory.post('/api/auth/login/', {
+            'email': user.email,
+            'password': 'wrong-password',
+        }, format='json')
+        with patch.object(
+            User.objects,
+            'filter',
+            return_value=SimpleNamespace(first=lambda: user),
+        ), patch('users.api_views.check_password', return_value=False), patch(
+            'users.api_views.issue_otp',
+        ) as issue:
+            response = LoginView.as_view()(request)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(user.status, 'PENDING_VERIFICATION')
+        user.save.assert_not_called()
+        issue.assert_not_called()
+
+    @override_settings(OTP_ENABLED=False)
+    def test_authenticated_user_can_change_contact_without_otp(self):
+        from .otp_api_views import ChangeContactRequestView
+
+        user = SimpleNamespace(
+            id=82,
+            pk=82,
+            is_authenticated=True,
+            email='old@example.test',
+            phone='',
+            updated_at=None,
+            save=Mock(),
+        )
+        request = self.factory.post(
+            '/api/auth/change-email/request/',
+            {'email': 'New@example.test'},
+            format='json',
+        )
+        force_authenticate(request, user=user)
+        duplicate_filter = SimpleNamespace(
+            exclude=lambda **kwargs: SimpleNamespace(exists=lambda: False),
+        )
+        with patch.object(
+            User.objects,
+            'filter',
+            return_value=duplicate_filter,
+        ), patch(
+            'users.otp_api_views.transaction.atomic',
+            return_value=nullcontext(),
+        ), patch('users.otp_api_views.issue_otp') as issue:
+            response = ChangeContactRequestView.as_view()(
+                request,
+                channel='email',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(user.email, 'new@example.test')
+        user.save.assert_called_once_with(update_fields=['email', 'updated_at'])
+        issue.assert_not_called()
+
+    @override_settings(OTP_ENABLED=False)
+    def test_change_contact_still_requires_authentication_without_otp(self):
+        from .otp_api_views import ChangeContactRequestView
+
+        request = self.factory.post(
+            '/api/auth/change-phone/request/',
+            {'phone': '+15550001111'},
+            format='json',
+        )
+        with patch('users.otp_api_views.issue_otp') as issue:
+            response = ChangeContactRequestView.as_view()(
+                request,
+                channel='phone',
+            )
+        self.assertEqual(response.status_code, 401)
+        issue.assert_not_called()
 
     def test_checkout_phone_otp_send_requires_authenticated_owner_and_hides_code(self):
         from .otp_api_views import OtpRequestView
@@ -646,7 +857,7 @@ class OtpApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 401)
         issue.assert_not_called()
 
-    def test_register_keeps_success_contract_after_otp_delivery(self):
+    def test_register_keeps_success_contract_when_otp_is_enabled(self):
         from users.api_views import RegisterView
 
         user = SimpleNamespace(email='student@example.com')
@@ -683,10 +894,9 @@ class OtpApiTests(SimpleTestCase):
             user=user,
         )
 
-    def test_register_emails_random_hashed_otp_and_verification_activates_user(self):
+    @override_settings(OTP_ENABLED=False)
+    def test_register_without_otp_activates_user_without_creating_or_sending_otp(self):
         from users.api_views import RegisterView
-        from users.services.otp import issue_otp
-        from users.otp_api_views import OtpVerifyView
 
         user = SimpleNamespace(
             id=82,
@@ -699,9 +909,6 @@ class OtpApiTests(SimpleTestCase):
         serializer.save.return_value = user
         registered_user = Mock()
         registered_user.data = {'email': user.email}
-        user_manager = Mock()
-        user_manager.select_for_update.return_value.get.return_value = user
-        otp_manager = _OtpManager()
         request = self.factory.post('/api/auth/register/', {
             'name': 'Test Student',
             'email': user.email,
@@ -716,50 +923,17 @@ class OtpApiTests(SimpleTestCase):
             return_value=registered_user,
         ), patch(
             'users.api_views.issue_otp',
-            side_effect=issue_otp,
-        ), patch.object(
-            User,
-            'objects',
-            user_manager,
-        ), patch.object(
-            OtpVerification,
-            'objects',
-            otp_manager,
-        ), patch(
-            'users.services.otp.transaction.atomic',
-            return_value=nullcontext(),
-        ), patch(
-            'users.services.otp.secrets.randbelow',
-            return_value=271828,
-        ), patch(
-            'users.services.otp.send_email',
-        ) as send_email, patch(
-            'users.otp_api_views.get_object_or_404',
-            return_value=user,
+        ) as issue, patch(
+            'users.api_views.timezone.now',
+            return_value=timezone.now(),
         ):
             response = RegisterView.as_view()(request)
-            self.assertEqual(response.status_code, 202)
-            self.assertTrue(response.data['verification_required'])
-            self.assertEqual(len(otp_manager.rows), 1)
-            verification = otp_manager.rows[0]
-            self.assertEqual(verification.status, 'PENDING')
-            send_email.assert_called_once()
-            email_text = send_email.call_args.kwargs['text']
-            code = re.search(r'\b\d{6}\b', email_text).group()
-            self.assertTrue(check_password(code, verification.otp_hash))
-            self.assertNotEqual(verification.otp_hash, code)
-
-            verify_request = self.factory.post('/api/auth/verify-otp/', {
-                'target': user.email,
-                'purpose': 'REGISTER',
-                'otp': code,
-            }, format='json')
-            verify_response = OtpVerifyView.as_view()(verify_request)
-
-        self.assertEqual(verify_response.status_code, 200)
-        self.assertEqual(verify_response.data['user_id'], user.id)
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.data['otp_enabled'])
+        self.assertFalse(response.data['verification_required'])
         self.assertEqual(user.status, 'ACTIVE')
-        self.assertEqual(verification.status, 'VERIFIED')
+        user.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+        issue.assert_not_called()
 
     def test_register_returns_service_unavailable_when_otp_delivery_fails(self):
         from users.api_views import RegisterView

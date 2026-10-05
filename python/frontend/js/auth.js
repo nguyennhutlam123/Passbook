@@ -6,8 +6,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const forgotOtpForm = document.querySelector("[data-forgot-otp-form]");
     const resetPasswordForm = document.querySelector("[data-reset-password-form]");
     const registerSuccess = document.querySelector("[data-register-success]");
+    const forgotToggle = document.querySelector("[data-forgot-toggle]");
+    const forgotUnavailable = document.querySelector("[data-forgot-unavailable]");
     let pendingRegistrationEmail = "";
     let pendingResetTarget = "";
+    let otpEnabled = false;
     const otpTimers = new WeakMap();
     const formatRemaining = (seconds) => {
         const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -61,6 +64,15 @@ document.addEventListener("DOMContentLoaded", () => {
             if (target) target.textContent = Array.isArray(message) ? message.join(" ") : String(message);
         });
     };
+    AuthAPI.otpStatus().then((result) => {
+        otpEnabled = result?.otp_enabled === true;
+        if (forgotToggle) forgotToggle.hidden = !otpEnabled;
+        if (forgotUnavailable) forgotUnavailable.hidden = otpEnabled;
+    }).catch(() => {
+        if (forgotToggle) forgotToggle.hidden = true;
+        if (forgotUnavailable) forgotUnavailable.hidden = false;
+    });
+
     loginForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const data = new FormData(loginForm);
@@ -106,11 +118,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 phone: data.get("phone")?.toString().trim() || "",
                 password: data.get("password"),
             });
-            pendingRegistrationEmail = data.get("email").toString().trim().toLowerCase();
             registerForm.hidden = true;
-            registerOtpForm.hidden = false;
-            registerOtpForm.querySelector("[data-register-otp-target]").textContent = pendingRegistrationEmail;
-            startOtpTimer(registerOtpForm, result);
+            if (result?.verification_required === true) {
+                pendingRegistrationEmail = data.get("email").toString().trim().toLowerCase();
+                registerOtpForm.hidden = false;
+                registerOtpForm.querySelector("[data-register-otp-target]").textContent = pendingRegistrationEmail;
+                startOtpTimer(registerOtpForm, result);
+            } else {
+                registerSuccess.hidden = false;
+            }
         } catch (error) {
             setErrors(registerForm, error.payload || {form: error.message});
             if (error.payload?.detail) showToast(error.payload.detail);
@@ -165,8 +181,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    document.querySelector("[data-forgot-toggle]")?.addEventListener("click", (event) => {
+    forgotToggle?.addEventListener("click", (event) => {
         event.preventDefault();
+        if (!otpEnabled) return;
         loginForm.hidden = true;
         forgotPasswordForm.hidden = false;
     });

@@ -34,6 +34,7 @@ from users.otp_api_views import (
     ChangeContactRequestView,
     ForgotPasswordView,
     OtpRequestView,
+    OtpStatusView,
     OtpVerifyView,
     ResetPasswordView,
 )
@@ -307,6 +308,7 @@ class CatalogOptionsView(APIView):
 
 urlpatterns = [
     path('health/', health_check, name='health-check'),
+    path('auth/otp-status/', OtpStatusView.as_view(), name='otp-status'),
     path('catalog/options/', CatalogOptionsView.as_view(), name='catalog-options'),
     path(
         'uploads/cloudinary/signature/',

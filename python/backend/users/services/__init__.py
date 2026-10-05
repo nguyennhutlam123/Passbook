@@ -1,5 +1,6 @@
 from .otp import (
     OtpDeliveryError,
+    OtpDisabledError,
     OtpRateLimitError,
     OtpVerificationError,
     issue_otp,
@@ -8,6 +9,7 @@ from .otp import (
 
 __all__ = [
     'OtpDeliveryError',
+    'OtpDisabledError',
     'OtpRateLimitError',
     'OtpVerificationError',
     'issue_otp',

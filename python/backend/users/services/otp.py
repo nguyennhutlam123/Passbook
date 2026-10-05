@@ -31,7 +31,19 @@ class OtpDeliveryError(APIException):
     default_code = 'otp_delivery_unavailable'
 
 
+class OtpDisabledError(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = 'Xác minh OTP hiện tạm thời không khả dụng.'
+    default_code = 'otp_disabled'
+
+    def __init__(self, detail=None):
+        super().__init__(detail or self.default_detail, code=self.default_code)
+
+
 def issue_otp(*, target, channel, purpose, user=None):
+    if not settings.OTP_ENABLED:
+        raise OtpDisabledError()
+
     now = timezone.now()
     target = target.strip().lower() if channel == 'EMAIL' else target.strip()
     expires_in = timedelta(seconds=settings.OTP_LIFETIME_SECONDS)
@@ -84,6 +96,9 @@ def issue_otp(*, target, channel, purpose, user=None):
 
 
 def verify_otp(*, target, purpose, code, user_id=None):
+    if not settings.OTP_ENABLED:
+        raise OtpDisabledError()
+
     now = timezone.now()
     target = target.strip().lower() if '@' in target else target.strip()
     error = None

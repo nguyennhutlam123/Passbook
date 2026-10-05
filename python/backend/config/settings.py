@@ -13,7 +13,6 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
-from django.core.exceptions import ImproperlyConfigured
 import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -36,25 +35,6 @@ PASSBOOK_ENVIRONMENT = os.environ.get(
     'PASSBOOK_ENVIRONMENT',
     'production',
 ).lower()
-PASSBOOK_OTP_MODE = os.environ.get('PASSBOOK_OTP_MODE', 'production').lower()
-PASSBOOK_DEV_OTP = os.environ.get('PASSBOOK_DEV_OTP', '123456')
-
-if PASSBOOK_OTP_MODE not in {'development', 'production'}:
-    raise ImproperlyConfigured(
-        'PASSBOOK_OTP_MODE must be development or production.',
-    )
-if PASSBOOK_OTP_MODE == 'development' and PASSBOOK_ENVIRONMENT not in {
-    'local', 'dev', 'development', 'test',
-}:
-    raise ImproperlyConfigured(
-        'Development OTP mode is only allowed in local/dev/test environments.',
-    )
-if PASSBOOK_OTP_MODE == 'development' and (
-    len(PASSBOOK_DEV_OTP) != 6 or not PASSBOOK_DEV_OTP.isdigit()
-):
-    raise ImproperlyConfigured(
-        'PASSBOOK_DEV_OTP must contain exactly six digits.',
-    )
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -139,17 +119,13 @@ PASSBOOK_SMS_DELIVERY_BACKEND = os.environ.get(
 )
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-EMAIL_USE_TLS = True
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_USE_SSL = False
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
-BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
-BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL', '')
-BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', '')
-BREVO_API_TIMEOUT = int(os.environ.get('BREVO_API_TIMEOUT', '10'))
 DEFAULT_FROM_EMAIL = os.environ.get(
     'DEFAULT_FROM_EMAIL',
     EMAIL_HOST_USER,

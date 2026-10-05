@@ -48,9 +48,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. Email OTP đăng ký/xác minh dùng Brevo Transactional Email API qua HTTPS; cần `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` và có thể đặt `BREVO_API_TIMEOUT` (mặc định 10 giây). Sender phải được xác minh trong Brevo. Không commit file `.env`.
-
-Email xác nhận đơn hàng và email khi quản trị viên đổi trạng thái đơn vẫn dùng SMTP hiện có, nên cần `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL` cho các email đó. `EMAIL_TIMEOUT` (mặc định 10 giây) giới hạn thời gian chờ SMTP này. Render Free chặn outbound SMTP; việc chuyển OTP sang HTTPS không chuyển các email thông báo đơn hàng.
+Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. OTP email và email thông báo được gửi bằng Django SMTP qua Gmail (`smtp.gmail.com:587`, TLS). Trên Render, đặt `EMAIL_HOST=smtp.gmail.com`, `EMAIL_PORT=587`, `EMAIL_USE_TLS=True`, `EMAIL_HOST_USER` thành địa chỉ Gmail gửi, `EMAIL_HOST_PASSWORD` thành Google App Password và `DEFAULT_FROM_EMAIL` thành địa chỉ gửi đó. Dùng Google App Password (không dùng mật khẩu đăng nhập Gmail); không commit file `.env`. `EMAIL_TIMEOUT` (mặc định 10 giây) giới hạn thời gian chờ. Render service/network cần cho phép outbound SMTP tới Gmail trên port 587.
 
 ## Tạo tài khoản kiểm thử
 
@@ -63,12 +61,6 @@ PASSBOOK_ENVIRONMENT=local python manage.py create_test_accounts \
   --admin-email admin@example.test \
   --dry-run
 ```
-
-## Chế độ OTP local/test
-
-Trong local/dev/test, đặt `PASSBOOK_OTP_MODE=development` và `PASSBOOK_DEV_OTP=123456`. OTP dùng mã cố định này nhưng vẫn được hash và lưu vào `otp_verifications`; xác minh vẫn áp dụng expiration, attempt limit, cooldown/resend và trạng thái đã dùng. Không gọi email/SMS provider trong mode này. Cấu hình production bắt buộc `PASSBOOK_OTP_MODE=production` (đây cũng là mặc định); Django từ chối khởi động nếu bật development OTP trong môi trường production. Không đặt mode development trên Render.
-
-Để dùng OTP provider hiện có trong local hoặc production, đặt `PASSBOOK_OTP_MODE=production`. Brevo/API credentials chỉ được đọc khi gửi email theo production path.
 
 ## Chạy backend
 

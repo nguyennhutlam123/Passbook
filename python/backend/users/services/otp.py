@@ -3,7 +3,6 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
-from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.utils import timezone
 from django.utils.module_loading import import_string
@@ -12,9 +11,6 @@ from rest_framework.exceptions import APIException
 
 from users.models import OtpVerification, User
 from .email import EmailProviderError, send_email
-
-
-DEV_OTP_ENVIRONMENTS = {'local', 'dev', 'development', 'test'}
 
 
 class OtpVerificationError(APIException):
@@ -36,21 +32,6 @@ class OtpDeliveryError(APIException):
 
 
 def issue_otp(*, target, channel, purpose, user=None):
-    use_dev_otp = settings.PASSBOOK_OTP_MODE == 'development'
-    if settings.PASSBOOK_OTP_MODE not in {'development', 'production'}:
-        raise ImproperlyConfigured('PASSBOOK_OTP_MODE is invalid.')
-    if use_dev_otp and settings.PASSBOOK_ENVIRONMENT not in DEV_OTP_ENVIRONMENTS:
-        raise ImproperlyConfigured(
-            'Development OTP mode is only allowed in local/dev/test environments.',
-        )
-    if use_dev_otp and (
-        len(settings.PASSBOOK_DEV_OTP) != 6
-        or not settings.PASSBOOK_DEV_OTP.isdigit()
-    ):
-        raise ImproperlyConfigured(
-            'PASSBOOK_DEV_OTP must contain exactly six digits.',
-        )
-
     now = timezone.now()
     target = target.strip().lower() if channel == 'EMAIL' else target.strip()
     expires_in = timedelta(seconds=settings.OTP_LIFETIME_SECONDS)
@@ -83,11 +64,7 @@ def issue_otp(*, target, channel, purpose, user=None):
                 previous.updated_at = now
                 previous.save(update_fields=['status', 'updated_at'])
 
-        code = (
-            settings.PASSBOOK_DEV_OTP
-            if use_dev_otp
-            else f'{secrets.randbelow(1_000_000):06d}'
-        )
+        code = f'{secrets.randbelow(1_000_000):06d}'
         verification = OtpVerification.objects.create(
             user=user,
             channel=channel,
@@ -101,8 +78,7 @@ def issue_otp(*, target, channel, purpose, user=None):
             created_at=now,
             updated_at=now,
         )
-        if not use_dev_otp:
-            _deliver_otp(target=target, channel=channel, purpose=purpose, code=code)
+        _deliver_otp(target=target, channel=channel, purpose=purpose, code=code)
 
     return verification
 

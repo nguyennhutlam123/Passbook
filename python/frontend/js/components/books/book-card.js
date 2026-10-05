@@ -50,9 +50,19 @@
         const favoriteAction = book.listing_type === "BORROW"
             ? ""
             : `<button class="favorite-button ${favorite ? "is-favorite" : ""}" type="button" data-favorite="${id}" aria-label="${favorite ? "Bỏ lưu" : "Lưu"} ${title}" aria-pressed="${pressed}">${favorite ? "♥" : "♡"}</button>`;
+        const isOwnBorrowListing = book.listing_type === "BORROW"
+            && Number(book.seller?.id) === Number(global.PassbookAuth?.getCurrentUser()?.id);
         const borrowAction = book.listing_type === "BORROW"
-            && Number(book.seller?.id) !== Number(global.PassbookAuth?.getCurrentUser()?.id)
-            ? `<button class="button button-primary" type="button" data-borrow-request="${escape(book.listing_id)}" data-book-id="${id}" data-title="${title}">Đặt mượn sách</button>`
+            ? isOwnBorrowListing
+                ? '<span class="caption">Tin đăng của bạn · không thể tự mượn</span>'
+                : `<button class="button button-primary" type="button" data-borrow-request="${escape(book.listing_id)}">Thêm phiếu mượn vào giỏ</button>`
+            : "";
+        const isOwnSaleListing = book.listing_type !== "BORROW"
+            && Number(book.seller?.id) === Number(global.PassbookAuth?.getCurrentUser()?.id);
+        const saleAction = book.listing_type !== "BORROW" && book.listing_id
+            ? isOwnSaleListing
+                ? '<span class="caption">Tin đăng của bạn · không thể tự mua</span>'
+                : `<button class="button button-primary" type="button" data-sale-add-to-cart="${escape(book.listing_id)}">Thêm vào giỏ</button>`
             : "";
         const borrowTerms = book.listing_type === "BORROW"
             ? `<p class="book-card__subject">${book.borrow_terms?.max_days ? `Tối đa ${escape(book.borrow_terms.max_days)} ngày` : "Thời hạn theo thỏa thuận"}${Number(book.deposit_amount) > 0 ? ` · Cọc ${global.formatPrice(Number(book.deposit_amount))}` : ""}</p>`
@@ -74,6 +84,7 @@
                 ${borrowTerms}
                 <div class="seller-line"><span>${seller}</span></div>
                 ${sellerLocation ? `<p class="book-card__location">${escape(sellerLocation)}</p>` : ""}
+                ${saleAction}
                 ${borrowAction}
             </div>
         </article>`;

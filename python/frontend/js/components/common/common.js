@@ -141,12 +141,6 @@
             : `<a class="nav-login" href="${basePath}login.html">Đăng nhập</a>`;
         const customerAccountActions = authenticated
             ? `<div class="nav-shortcuts">
-                <a class="nav-icon-link" href="${basePath}favorites.html" aria-label="Sách yêu thích" title="Sách yêu thích">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.7c0 5.1-8.8 10.2-8.8 10.2S3.2 13.8 3.2 8.7A4.2 4.2 0 0 1 11 6.1l1 1 1-1a4.2 4.2 0 0 1 7.8 2.6Z"/></svg><span class="nav-icon-link__label">Yêu thích</span>
-                </a>
-                <a class="nav-icon-link" href="${basePath}messages.html" aria-label="Tin nhắn" title="Tin nhắn">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v12H9l-5 3v-15Z"/><path d="M8 10h8M8 13.5h5"/></svg><span class="nav-icon-link__label">Tin nhắn</span>
-                </a>
                 <a class="nav-icon-link notification-button ${page === "notifications.html" ? "is-active" : ""}" href="${basePath}notifications.html" aria-label="Thông báo" ${page === "notifications.html" ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span class="nav-icon-link__label">Thông báo</span></a>
             </div>
             <details class="nav-more">
@@ -155,7 +149,9 @@
                     <span class="nav-profile-label">${escapeHtml(userName)}</span><span aria-hidden="true">⌄</span>
                 </summary>
                 <div class="nav-more__panel">
-                    <a href="${basePath}profile.html">Hồ sơ</a>
+                    <a class="${page === "favorites.html" ? "is-active" : ""}" href="${basePath}favorites.html" ${page === "favorites.html" ? 'aria-current="page"' : ""}>Yêu thích</a>
+                    <a class="${page === "messages.html" ? "is-active" : ""}" href="${basePath}messages.html" ${page === "messages.html" ? 'aria-current="page"' : ""}>Tin nhắn</a>
+                    <a class="${page === "profile.html" ? "is-active" : ""}" href="${basePath}profile.html" ${page === "profile.html" ? 'aria-current="page"' : ""}>Hồ sơ</a>
                     <a href="${basePath}orders.html">Đơn hàng</a>
                     <a href="${basePath}borrow-tickets.html">Phiếu mượn</a>
                     <a href="${basePath}my-listings.html">Tin đăng của tôi</a>

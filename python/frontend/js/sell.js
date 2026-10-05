@@ -355,13 +355,30 @@ document.addEventListener("DOMContentLoaded", () => {
             localStorage.removeItem("editingListing");
             const detailLink = document.querySelector("[data-sell-detail-link]");
             if (detailLink) {
-                detailLink.href = book.listing_type === "BORROW"
-                    ? `book-detail.html?id=${book.id}&listing_type=borrow&listing_id=${book.listing_id}`
-                    : `book-detail.html?id=${book.id}`;
+                detailLink.href = editing
+                    ? book.listing_type === "BORROW"
+                        ? `book-detail.html?id=${book.id}&listing_type=borrow&listing_id=${book.listing_id}`
+                        : `book-detail.html?id=${book.id}`
+                    : "profile.html";
+                detailLink.textContent = editing ? "Xem chi tiết tin đăng" : "Về hồ sơ";
             }
             form.hidden = true;
             success.hidden = false;
-            showToast(editing ? "Đã cập nhật tin đăng." : "Đăng tin thành công.");
+            const successTitle = success.querySelector("[data-sell-success-title]");
+            const successDescription = success.querySelector("[data-sell-success-description]");
+            if (successTitle) {
+                successTitle.textContent = editing
+                    ? "Cập nhật tin đăng thành công"
+                    : "Tin đăng đã gửi kiểm duyệt";
+            }
+            if (successDescription) {
+                successDescription.textContent = editing
+                    ? "Tin đăng đã được cập nhật."
+                    : "Sách sẽ hiển thị trên trang chính sau khi Admin phê duyệt.";
+            }
+            showToast(editing
+                ? "Đã cập nhật tin đăng."
+                : "Tin đăng đã gửi kiểm duyệt và sẽ hiển thị sau khi Admin duyệt.");
         } catch (error) {
             const uploadedPublicIds = uploadedImages
                 .map((image) => image.cloudinary_public_id)

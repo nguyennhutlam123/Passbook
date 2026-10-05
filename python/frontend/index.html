@@ -32,22 +32,6 @@
             </div>
         </section>
 
-        <section class="page-shell catalog-navigation" id="catalog-navigation" aria-labelledby="catalog-navigation-title">
-            <div class="section-heading section-heading--catalog">
-                <div><span class="eyebrow">Tìm nhanh</span><h2 id="catalog-navigation-title">Khám phá theo danh mục</h2></div>
-                <a class="text-link" href="books.html">Tất cả sách <span>→</span></a>
-            </div>
-            <nav class="category-grid" aria-label="Danh mục sách">
-                <a class="category-card" href="books.html?category_slug=tieu-thuyet"><span aria-hidden="true">01</span><strong>Tiểu thuyết</strong></a>
-                <a class="category-card" href="books.html?category_slug=tho"><span aria-hidden="true">02</span><strong>Thơ</strong></a>
-                <a class="category-card" href="books.html?category_slug=kich"><span aria-hidden="true">03</span><strong>Kịch</strong></a>
-                <a class="category-card" href="books.html?category_slug=sach-giao-khoa"><span aria-hidden="true">04</span><strong>Sách giáo khoa</strong></a>
-                <a class="category-card" href="books.html?category_slug=giao-trinh"><span aria-hidden="true">05</span><strong>Giáo trình</strong></a>
-                <a class="category-card" href="books.html?category_slug=tai-lieu"><span aria-hidden="true">06</span><strong>Tài liệu</strong></a>
-                <a class="category-card" href="books.html?category_slug=truyen-tranh"><span aria-hidden="true">07</span><strong>Truyện tranh</strong></a>
-            </nav>
-        </section>
-
         <div class="storefront-content" data-home-content>
             <section class="page-shell collection-section collection-section--new" aria-labelledby="new-books-title">
                 <div class="collection-heading">
@@ -58,8 +42,6 @@
                     <p class="loading-state book-grid__state" role="status">Đang tải sách mới đăng...</p>
                 </div>
             </section>
-
-            <div class="category-collections" data-category-collections></div>
         </div>
 
         <section class="page-shell collection-section collection-section--borrow" aria-labelledby="home-borrow-title">
@@ -101,14 +83,15 @@
     <script src="js/core/auth.js"></script>
     <script src="js/core/router.js"></script>
     <script src="js/core/guards.js"></script>
-    <script src="js/components/common/common.js"></script>
-    <script src="js/components/books/book-card.js"></script>
+    <script src="js/components/common/common.js?v=borrow-workflow-20261005"></script>
+    <script src="js/components/books/book-card.js?v=sale-cart-20261005"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
     <script src="js/api/books-api.js"></script>
     <script src="js/api/favorites-api.js"></script>
+    <script src="js/api/orders-api.js?v=borrow-workflow-20261005"></script>
     <script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js"></script>
+    <script src="js/main.js?v=sale-cart-20261005"></script>
 </body>
 </html>

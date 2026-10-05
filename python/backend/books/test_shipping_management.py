@@ -1,9 +1,11 @@
 from decimal import Decimal
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 from django.http import Http404
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -219,6 +221,91 @@ class ShipmentStateMachineTests(SimpleTestCase):
         shipment.save.assert_called_once()
         order.save.assert_called_once_with(
             update_fields=['status', 'completed_at', 'updated_at'],
+        )
+        notify.assert_called_once_with(order, 'CONFIRMED')
+
+    def test_admin_borrow_delivery_activates_ticket_and_collects_cod(self):
+        now = timezone.now()
+        payment = SimpleNamespace(
+            payment_method='COD',
+            status='PENDING',
+            paid_at=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        payment_manager = Mock()
+        payment_manager.select_for_update.return_value.filter.return_value = [payment]
+        book = SimpleNamespace(status='RESERVED', updated_at=None, save=Mock())
+        listing = SimpleNamespace(
+            status='RESERVED',
+            updated_at=None,
+            book=book,
+            save=Mock(),
+        )
+        borrow = SimpleNamespace(
+            id=14,
+            status='CONFIRMED',
+            actual_start_at=None,
+            updated_at=None,
+            return_tracking_code=None,
+            lend_listing=listing,
+            save=Mock(),
+        )
+        order = SimpleNamespace(
+            id=9,
+            order_type='BORROW',
+            status='CONFIRMED',
+            updated_at=None,
+            save=Mock(),
+        )
+        shipment = SimpleNamespace(
+            id=5,
+            order_id=order.id,
+            order=order,
+            status='OUT_FOR_DELIVERY',
+            shipped_at=now - timedelta(hours=1),
+            delivered_at=None,
+            updated_at=None,
+            save=Mock(),
+            tracking_events=Mock(),
+        )
+        shipment.tracking_events.order_by.return_value.first.return_value = None
+        event_model = Mock()
+        event_model.objects.create.return_value = SimpleNamespace(id=83)
+
+        with patch(
+            'books.shipment_services.timezone.now',
+            return_value=now,
+        ), patch(
+            'books.shipment_services.Payment.objects',
+            payment_manager,
+        ), patch(
+            'books.shipment_services.notify_order_status_changed',
+        ) as notify:
+            event, old_status = update_shipment_status.__wrapped__(
+                shipment,
+                status='DELIVERED',
+                source='ADMIN',
+                borrow=borrow,
+                event_model=event_model,
+            )
+
+        self.assertEqual(old_status, 'OUT_FOR_DELIVERY')
+        self.assertEqual(event.id, 83)
+        self.assertEqual(borrow.status, 'ACTIVE')
+        self.assertIs(borrow.actual_start_at, now)
+        self.assertEqual(listing.status, 'ON_LOAN')
+        self.assertEqual(book.status, 'ON_LOAN')
+        self.assertEqual(order.status, 'PROCESSING')
+        self.assertEqual(payment.status, 'PAID')
+        borrow.save.assert_called_once_with(
+            update_fields=['status', 'actual_start_at', 'updated_at'],
+        )
+        listing.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+        book.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+        order.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+        payment.save.assert_called_once_with(
+            update_fields=['status', 'paid_at', 'updated_at'],
         )
         notify.assert_called_once_with(order, 'CONFIRMED')
 
@@ -492,6 +579,50 @@ class AdminShipmentPermissionTests(SimpleTestCase):
         view = ShipmentTrackingCreateView()
         request = view.initialize_request(request)
         request.user = seller
+
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=shipment,
+        ), patch(
+            'books.commerce_api_views.BorrowOrder.objects',
+            borrow_manager,
+        ), patch(
+            'books.commerce_api_views.ShipmentTracking.objects.create',
+        ) as create_event:
+            with self.assertRaises(PermissionDenied):
+                ShipmentTrackingCreateView.post.__wrapped__(
+                    view,
+                    request,
+                    shipment_id=shipment.id,
+                )
+
+        create_event.assert_not_called()
+
+    def test_borrow_tracking_status_is_reserved_for_admin_shipping_api(self):
+        borrower = SimpleNamespace(id=88, is_authenticated=True, role='STUDENT')
+        order = SimpleNamespace(order_type='BORROW', seller_id=96)
+        shipment = SimpleNamespace(
+            id=30,
+            order_id=31,
+            tracking_code='PB-BORROW-TEST',
+            status='PENDING',
+            order=order,
+        )
+        borrow = SimpleNamespace(
+            borrower_id=borrower.id,
+            lender_id=96,
+            return_tracking_code=None,
+        )
+        borrow_manager = Mock()
+        borrow_manager.filter.return_value.first.return_value = borrow
+        request = self.factory.post(
+            '/api/shipments/30/tracking/',
+            {'status': 'PICKED_UP'},
+            format='json',
+        )
+        view = ShipmentTrackingCreateView()
+        request = view.initialize_request(request)
+        request.user = borrower
 
         with patch(
             'books.commerce_api_views.get_object_or_404',

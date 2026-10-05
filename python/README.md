@@ -29,7 +29,7 @@ MySQL
 - `backend/messaging/`: conversations và messages.
 - `backend/notifications/`: notifications.
 - `backend/reports/`: reports.
-- `frontend/workspace.html`: giỏ hàng, checkout, orders, reservation và borrow workflow.
+- `frontend/workspace.html`: giỏ hàng, checkout, orders và phiếu mượn.
 - `frontend/requests.html`: book requests, matching và interests.
 - `frontend/admin/`: dashboard, moderation và quản lý người dùng.
 
@@ -92,10 +92,15 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
   Mỗi tin hỗ trợ tối đa 10 ảnh JPG/PNG/WebP/GIF (10 MB/ảnh); backend xác minh định dạng,
   dung lượng và URL với Cloudinary trước khi lưu `BookImage`. Cloudinary cần được cấu hình
   qua `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` và `CLOUDINARY_API_SECRET` trong môi trường.
-- **Commerce:** cart, checkout, order, payment simulation, shipping/tracking, return/refund.
-- **Borrow:** đăng ký qua `book_reservations`, không qua Cart/Checkout/Order. Với schema Lite
-  hiện tại, reservation `CONFIRMED` biểu diễn sách đang được mượn; `COMPLETED` biểu diễn đã trả.
-  `expires_at` chỉ là hạn phản hồi request đang `PENDING`, không phải ngày bắt đầu/kết thúc mượn.
+- **Commerce:** cart, checkout, sale/borrow orders, payment simulation, shipping/tracking,
+  return/refund.
+- **Borrow:** tin cho mượn mới ở trạng thái `PENDING` và chỉ công khai sau khi Admin duyệt.
+  Người mượn thêm tin đang hoạt động vào cart, chọn ngày bắt đầu/ngày trả và checkout để tạo
+  `Order` cùng `BorrowOrder`. Checkout BORROW-only dùng COD khi Admin giao; backend khóa
+  listing và Book, tự tạo Shipment và đặt phiếu ở trạng thái đã xác nhận. Admin cập nhật
+  vận chuyển; khi giao thành công phiếu chuyển sang `ACTIVE`, sách chuyển `ON_LOAN` và COD
+  được ghi nhận đã thu. Các bước trả và hoàn tất tiếp tục dùng lifecycle của `BorrowOrder`.
+  Reservation cũ không còn dùng để tạo yêu cầu mượn mới.
 - **Requests:** dự định mua/bán, book requests, matching và interests.
 - **Favorites:** thêm, xóa và danh sách sách yêu thích.
 - **Messaging:** conversations và messages.
@@ -103,17 +108,18 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
 - **Reports:** tạo report và danh sách report của người dùng.
 - **Profiles:** profile người dùng và seller profile công khai.
 
-Cart bán sách coi mỗi listing là một bản duy nhất: API chặn item trùng, báo giá lại từ listing
-trong database và không nhận giá/tổng tiền từ frontend. Checkout chỉ tạo Order/Payment, đánh dấu
-listing đã bán và xóa cart item sau Fake Payment SUCCESS; FAILURE/CANCEL giữ nguyên Cart. Fake
-checkout chỉ hoạt động khi cấu hình `PASSBOOK_ENVIRONMENT=local` (hoặc `test`) và
-`PASSBOOK_FAKE_PAYMENTS_ENABLED=true`. Phí vận chuyển hiện là 0 vì Lite schema/project chưa có
-quy tắc tính phí giao hàng.
+Cart coi mỗi listing là một bản duy nhất: API chặn item trùng, báo giá lại từ listing trong
+database và không nhận giá/tổng tiền từ frontend. Cart dùng chung cho cả BUY và BORROW; checkout
+BUY giữ nguyên phương thức thanh toán đã chọn, còn checkout chỉ gồm BORROW dùng COD để yêu cầu
+được tạo mà không phụ thuộc Fake/Online payment. Shipment BORROW được tạo tự động và chỉ Admin
+cập nhật trạng thái giao hàng. Fake checkout chỉ hoạt động khi cấu hình
+`PASSBOOK_ENVIRONMENT=local` (hoặc `test`) và `PASSBOOK_FAKE_PAYMENTS_ENABLED=true`. Phí vận
+chuyển hiện là 0 vì Lite schema/project chưa có quy tắc tính phí giao hàng.
 
 BUY và BORROW là hai listing model riêng đã có trong Lite schema; không thêm cột hay migration.
-BORROW listing không xuất hiện trong trang Mua và bị từ chối tại Cart/Checkout. Khi gửi yêu cầu
-mượn, backend khóa Book, chuyển listing sang `RESERVED`, rồi khi chủ sách duyệt sẽ chuyển listing
-và Book sang `ON_LOAN`. Hoàn tất reservation trả listing về `ACTIVE` và Book về `AVAILABLE`.
+Tin BUY và BORROW đều cần Admin duyệt trước khi xuất hiện công khai. BORROW listing không xuất
+hiện trong trang Mua; sau checkout, Admin tiếp nhận và điều phối giao sách, không yêu cầu người
+cho mượn xác nhận/chuẩn bị phiếu.
 
 ## Demo data
 

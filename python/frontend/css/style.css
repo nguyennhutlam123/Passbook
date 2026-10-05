@@ -955,6 +955,127 @@ a:hover {
 .seller-cta--storefront .eyebrow,.seller-cta--storefront h2 { color: #fff; } .seller-cta--storefront h2 { font-size: clamp(1.8rem,4vw,3rem); margin: .5rem 0; } .seller-cta--storefront p { color: #c8d4d2; }
 .button-light { background: #f4d1a9; color: #243c45; margin-left: auto; position: relative; z-index: 1; } .button-light:hover { background: #fff; color: #243c45; }
 
+@media (min-width: 901px) {
+    .home-page .navbar > .nav-search {
+        display: none;
+    }
+}
+
+@media (min-width: 901px) and (max-width: 1300px) {
+    .home-page .navbar {
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        min-height: 4.25rem;
+        padding: 0.6rem 0;
+    }
+
+    .home-page .navbar > .brand {
+        margin-right: auto;
+    }
+
+    .home-page .navbar > .nav-toggle {
+        align-items: center;
+        background: var(--surface-color);
+        border: 1px solid var(--border-color);
+        color: var(--primary-color);
+        display: inline-flex;
+        flex: 0 0 auto;
+        min-height: 2.5rem;
+        padding: 0.35rem 0.65rem;
+    }
+
+    .home-page .nav-menu {
+        background: var(--surface-color);
+        border-top: 1px solid var(--border-color);
+        display: none;
+        flex: 1 0 100%;
+        gap: 0.75rem;
+        order: 4;
+        padding: 0.9rem 0 0.25rem;
+        white-space: normal;
+        width: 100%;
+    }
+
+    .home-page .nav-menu.is-open {
+        display: grid;
+    }
+
+    .home-page .nav-links,
+    .home-page .nav-actions {
+        align-items: stretch;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .home-page .nav-shortcuts {
+        flex-wrap: wrap;
+    }
+}
+
+@media (min-width: 901px) and (max-height: 850px) and (orientation: landscape) {
+    .storefront-hero__inner {
+        gap: 1.5rem;
+        grid-template-columns: minmax(0, 1.1fr) minmax(20rem, .9fr);
+        min-height: 29rem;
+        padding-bottom: 2rem;
+        padding-top: 2rem;
+    }
+
+    .storefront-hero__copy h1 {
+        font-size: clamp(2.8rem, 4.6vw, 4.4rem);
+        margin-bottom: 1rem;
+    }
+
+    .storefront-hero__copy > p {
+        font-size: 1rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .storefront-search {
+        max-width: 100%;
+    }
+
+    .storefront-hero__art {
+        height: 22rem;
+    }
+
+    .storefront-hero__art::before {
+        height: 23rem;
+        right: 0;
+        width: 23rem;
+    }
+
+    .book-stack--one {
+        height: 15rem;
+        right: 1rem;
+        top: 1rem;
+        width: 10rem;
+    }
+
+    .book-stack--two {
+        height: 16rem;
+        right: 6rem;
+        top: 2rem;
+        width: 11rem;
+    }
+
+    .book-stack--main {
+        height: 18rem;
+        left: 1.5rem;
+        top: 3rem;
+        width: 13rem;
+    }
+
+    .book-stack--main span {
+        font-size: 2rem;
+    }
+
+    .hero-sticker {
+        top: 13.5rem;
+    }
+}
+
 /* These overrides follow the storefront rules so mobile breakpoints win. */
 @media (max-width: 768px) {
     html,
@@ -1619,11 +1740,21 @@ textarea:focus {
     grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr);
 }
 
+.catalog-layout--empty {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.catalog-layout--empty .filter-panel,
+.catalog-layout--empty .filter-open {
+    display: none !important;
+}
+
 .filter-panel {
     background: var(--surface-color);
     border-color: var(--border-color);
     display: grid;
     gap: 1rem;
+    grid-column: auto;
     position: sticky;
     top: 6rem;
 }

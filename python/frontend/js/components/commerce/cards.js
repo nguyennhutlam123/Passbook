@@ -31,10 +31,31 @@
             item.condition_status,
         ].filter(Boolean).join(" · ");
         card.append(title, meta);
+        if (item.listing_type === "BORROW") {
+            const pricing = document.createElement("span");
+            pricing.textContent = [
+                `Phí mượn: ${global.formatPrice(Number(item.rental_fee) || 0)}`,
+                Number(item.deposit_amount) > 0
+                    ? `Đặt cọc: ${global.formatPrice(Number(item.deposit_amount))}`
+                    : "Không cần đặt cọc",
+                item.borrow_terms?.max_days
+                    ? `Tối đa ${item.borrow_terms.max_days} ngày`
+                    : "",
+            ].filter(Boolean).join(" · ");
+            card.append(pricing);
+        }
         if (seller.textContent) card.append(seller);
         if (item.listing_type === "BORROW") {
             const dates = document.createElement("div");
             dates.className = "borrow-date-fields";
+            const formatLocalDateTime = (date) =>
+                new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+                    .toISOString()
+                    .slice(0, 16);
+            const start = new Date(Date.now() + 60 * 60 * 1000);
+            const maxDays = Math.max(1, Number(item.borrow_terms?.max_days) || 7);
+            const durationDays = Math.min(maxDays, 7);
+            const end = new Date(start.getTime() + durationDays * 24 * 60 * 60 * 1000);
             for (const [key, label] of [
                 ["expected_start_at", "Bắt đầu mượn"],
                 ["expected_return_at", "Dự kiến trả"],
@@ -46,12 +67,28 @@
                 input.className = "form-control";
                 input.type = "datetime-local";
                 input.required = true;
+                input.min = formatLocalDateTime(new Date());
+                input.value = formatLocalDateTime(
+                    key === "expected_start_at" ? start : end,
+                );
                 input.dataset.borrowListing = String(item.listing_id);
                 input.dataset.cartItem = String(item.id);
                 input.dataset.borrowField = key;
                 field.append(input);
                 dates.append(field);
             }
+            const startInput = dates.querySelector('[data-borrow-field="expected_start_at"]');
+            const returnInput = dates.querySelector('[data-borrow-field="expected_return_at"]');
+            returnInput.min = startInput.value;
+            startInput.addEventListener("change", () => {
+                returnInput.min = startInput.value;
+                if (returnInput.value <= startInput.value) {
+                    const newReturn = new Date(
+                        new Date(startInput.value).getTime() + 24 * 60 * 60 * 1000,
+                    );
+                    returnInput.value = formatLocalDateTime(newReturn);
+                }
+            });
             card.append(dates);
         }
         const remove = document.createElement("button");

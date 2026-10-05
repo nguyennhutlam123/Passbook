@@ -282,7 +282,7 @@ class SaleListingListCreateView(APIView):
             })
         if LendListing.objects.filter(
             book=book,
-            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+            status__in=('PENDING', 'ACTIVE', 'RESERVED', 'ON_LOAN'),
         ).exists():
             raise serializers.ValidationError({
                 'book_id': 'Sách đang có tin cho mượn hoạt động.',
@@ -357,6 +357,13 @@ class SaleListingDetailView(APIView):
             ).exclude(pk=listing.pk).exists():
                 raise serializers.ValidationError({
                     'status': 'Sách đã có listing chưa thể đăng bán lại.',
+                })
+            if LendListing.objects.filter(
+                book_id=listing.book_id,
+                status__in=('PENDING', 'ACTIVE', 'RESERVED', 'ON_LOAN'),
+            ).exists():
+                raise serializers.ValidationError({
+                    'status': 'Sách đã có tin cho mượn chưa thể kích hoạt tin bán.',
                 })
 
         for field in ('title', 'description', 'price', 'status'):

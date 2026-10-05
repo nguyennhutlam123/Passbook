@@ -71,57 +71,59 @@ function showModal(content) {
     });
 }
 
-function openBorrowReservationDialog({bookId, listingId, title, onCreated}) {
+async function addBorrowListingToCart(listingId, button) {
     if (!PassbookGuards.requireAuth()) return;
-    const formatLocalDateTime = (date) =>
-        new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-            .toISOString()
-            .slice(0, 16);
-    const minimumExpiry = formatLocalDateTime(new Date());
-    const defaultExpiry = formatLocalDateTime(
-        new Date(Date.now() + 24 * 60 * 60 * 1000),
-    );
-    showModal(`<form data-borrow-reservation-form>
-        <button class="modal-close" type="button" data-modal-close>Đóng</button>
-        <h2>Đặt mượn sách</h2>
-        <p><strong>${escapeHtml(title || "Giáo trình")}</strong></p>
-        <label class="form-label" for="borrow-request-expiry">Yêu cầu có hiệu lực đến</label>
-        <input class="form-control" id="borrow-request-expiry" name="expires_at" type="datetime-local" min="${minimumExpiry}" value="${defaultExpiry}" required>
-        <p class="caption">Đây là thời hạn phản hồi yêu cầu theo schema; ngày bắt đầu và ngày trả chưa được lưu trong BookReservation.</p>
-        <p class="form-error" data-borrow-reservation-error></p>
-        <div class="modal-actions">
-            <button class="button button-outline" type="button" data-modal-close>Hủy</button>
-            <button class="button button-primary" type="submit">Xác nhận đặt mượn</button>
-        </div>
-    </form>`);
-    const form = document.querySelector("[data-borrow-reservation-form]");
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!form.reportValidity()) return;
-        const submit = form.querySelector("button[type='submit']");
-        const error = form.querySelector("[data-borrow-reservation-error]");
-        submit.disabled = true;
-        error.textContent = "";
-        try {
-            const expiresAt = new Date(
-                new FormData(form).get("expires_at").toString(),
-            );
-            const reservation = await ReservationsAPI.create(bookId, {
-                expires_at: expiresAt.toISOString(),
-            });
-            onCreated?.(reservation);
-            showModal(`<section class="borrow-request-success">
-                <button class="modal-close" type="button" data-modal-close>Đóng</button>
-                <span class="success-panel__icon" aria-hidden="true">✓</span>
-                <h2>Đã gửi yêu cầu mượn</h2>
-                <p>Phiếu mượn #${Number(reservation.id)} đã được tạo.</p>
-                <a class="button button-primary" href="borrow-tickets.html?reservation_id=${encodeURIComponent(reservation.id)}">Xem phiếu mượn mới</a>
-            </section>`);
-        } catch (requestError) {
-            error.textContent = requestError.message;
-        } finally {
-            submit.disabled = false;
+    if (button) button.disabled = true;
+    try {
+        const id = Number(listingId);
+        await OrdersAPI.addCartItem({listing_type: "BORROW", listing_id: id});
+        window.location.assign(`cart.html?buy_now=${encodeURIComponent(id)}`);
+    } catch (error) {
+        showToast(error.message);
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function addSaleListingToCart(listingId, button, {buyNow = false} = {}) {
+    if (!PassbookGuards.requireAuth()) return;
+    const id = Number(listingId);
+    if (!Number.isSafeInteger(id) || id < 1) {
+        showToast("Không tìm thấy tin bán hợp lệ cho sách này.");
+        return;
+    }
+    if (button) button.disabled = true;
+    try {
+        await OrdersAPI.addCartItem({listing_type: "SALE", listing_id: id});
+        if (buyNow) {
+            window.location.assign(`cart.html?buy_now=${encodeURIComponent(id)}`);
+            return;
         }
+        showToast("Đã thêm sách vào giỏ hàng.");
+    } catch (error) {
+        showToast(error.message);
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function bindSaleButtons(root = document) {
+    root.querySelectorAll("[data-sale-add-to-cart]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void addSaleListingToCart(button.dataset.saleAddToCart, button);
+        });
+    });
+}
+
+function bindBorrowButtons(root = document) {
+    root.querySelectorAll("[data-borrow-request]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void addBorrowListingToCart(button.dataset.borrowRequest, button);
+        });
     });
 }
 
@@ -209,6 +211,18 @@ function renderBookCard(book) {
     return PassbookBookComponents.bookCard(book, {favorite: isFavoriteBook(book.id)});
 }
 
+function syncFavoriteButtons(root) {
+    root.querySelectorAll("[data-favorite]").forEach((button) => {
+        const favorite = isFavoriteBook(button.dataset.favorite);
+        const title = button.getAttribute("aria-label").replace(/^(Lưu|Bỏ lưu) /, "");
+        button.classList.toggle("is-favorite", favorite);
+        button.setAttribute("aria-pressed", String(favorite));
+        button.setAttribute("aria-label", `${favorite ? "Bỏ lưu" : "Lưu"} ${title}`);
+        button.textContent = favorite ? "♥" : "♡";
+        button.disabled = false;
+    });
+}
+
 async function toggleFavorite(bookId, button) {
     if (!isLoggedIn()) {
         window.location.href = "login.html";
@@ -239,9 +253,12 @@ function bindFavoriteButtons(root = document) {
 
 function renderHomepage() {
     const newGrid = document.querySelector("[data-new-books]");
-    const collections = document.querySelector("[data-category-collections]");
     const borrowGrid = document.querySelector("[data-home-borrow]");
-    if (!newGrid || !collections || !borrowGrid) return;
+    if (!newGrid || !borrowGrid) return;
+    const favoritesPromise = isLoggedIn()
+        ? loadFavoriteBookIds().then(() => null, (error) => error)
+        : Promise.resolve(null);
+
     BooksAPI.lendListings({page_size: 4}).then((data) => {
         const listings = data.results || [];
         const books = listings.map((listing) => ({
@@ -272,8 +289,9 @@ function renderHomepage() {
                     "Quay lại sau để xem các tin mượn mới.",
                 )]
         ));
+        bindBorrowButtons(borrowGrid);
         attachImageFallbacks(borrowGrid);
-    }).catch(() => {
+    }).catch((error) => {
         const failure = PassbookCommonComponents.emptyStateElement(
             "Không thể tải sách cho mượn.",
             "Vui lòng thử lại sau hoặc xem các tin đăng mượn sách.",
@@ -284,35 +302,19 @@ function renderHomepage() {
         browse.textContent = "Xem sách cho mượn";
         failure.append(browse);
         borrowGrid.replaceChildren(failure);
+        console.error("Không thể tải sách cho mượn trên trang chủ.", error);
     });
-    const categorySections = [
-        {name: "Tiểu thuyết", slug: "tieu-thuyet", description: "Những câu chuyện và thế giới giàu cảm xúc.", tone: "blue"},
-        {name: "Thơ", slug: "tho", description: "Tuyển tập thơ và những vần điệu đáng nhớ.", tone: "orange"},
-        {name: "Kịch", slug: "kich", description: "Tác phẩm sân khấu và kịch bản.", tone: "green"},
-        {name: "Sách giáo khoa", slug: "sach-giao-khoa", description: "Sách học tập theo chương trình giáo dục.", tone: "purple"},
-        {name: "Giáo trình", slug: "giao-trinh", description: "Giáo trình và sách chuyên ngành.", tone: "pink"},
-        {name: "Tài liệu", slug: "tai-lieu", description: "Tài liệu tham khảo và học tập.", tone: "blue"},
-        {name: "Truyện tranh", slug: "truyen-tranh", description: "Truyện tranh cho nhiều lứa tuổi.", tone: "orange"},
-    ];
-    const renderCollection = (section, books) => {
-        if (!books.length) return "";
-        const query = encodeURIComponent(section.slug);
-        return `<section class="page-shell collection-section category-collection collection-section--${section.tone}" aria-labelledby="collection-${section.slug}">
-            <div class="collection-heading"><div><span class="eyebrow">${section.name}</span><h2 id="collection-${section.slug}">${section.name}</h2><p>${section.description}</p></div><a class="text-link" href="books.html?category_slug=${query}">Xem tất cả <span>→</span></a></div>
-            <div class="book-grid book-grid--storefront">${books.slice(0, 4).map(renderBookCard).join("")}</div>
-        </section>`;
-    };
-    BooksAPI.list({page_size: 24}).then(async (data) => {
-        if (isLoggedIn()) {
-            try {
-                await loadFavoriteBookIds();
-            } catch (error) {
-                showToast(error.message);
-            }
-        }
+
+    BooksAPI.list({page_size: 4, sort: "newest"}).then((data) => {
         const books = data.results || [];
         if (books.length) {
-            newGrid.innerHTML = books.slice(0, 4).map(renderBookCard).join("");
+            newGrid.innerHTML = books.map(renderBookCard).join("");
+            bindSaleButtons(newGrid);
+            if (isLoggedIn()) {
+                newGrid.querySelectorAll("[data-favorite]").forEach((button) => {
+                    button.disabled = true;
+                });
+            }
         } else {
             const empty = PassbookCommonComponents.emptyStateElement(
                 "Chưa có sách mới đăng.",
@@ -325,13 +327,21 @@ function renderHomepage() {
             empty.append(browse);
             newGrid.replaceChildren(empty);
         }
-        collections.innerHTML = categorySections.map((section) => renderCollection(
-            section,
-            books.filter((book) => book.category?.name === section.name),
-        )).join("");
-        bindFavoriteButtons(document);
-        attachImageFallbacks(document);
-    }).catch(() => {
+        bindFavoriteButtons(newGrid);
+        attachImageFallbacks(newGrid);
+        if (isLoggedIn()) {
+            favoritesPromise.then((error) => {
+                if (error) {
+                    newGrid.querySelectorAll("[data-favorite]").forEach((button) => {
+                        button.disabled = false;
+                    });
+                    showToast(error.message);
+                    return;
+                }
+                syncFavoriteButtons(newGrid);
+            });
+        }
+    }).catch((error) => {
         const failure = PassbookCommonComponents.emptyStateElement(
             "Không thể tải sách mới.",
             "Kiểm tra kết nối rồi thử tải lại.",
@@ -343,6 +353,7 @@ function renderHomepage() {
         retry.addEventListener("click", () => window.location.reload());
         failure.append(retry);
         newGrid.replaceChildren(failure);
+        console.error("Không thể tải sách mới trên trang chủ.", error);
     });
 
     document.querySelector("[data-home-search]")?.addEventListener("submit", (event) => {

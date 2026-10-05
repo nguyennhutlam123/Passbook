@@ -536,8 +536,8 @@ class BookWriteSerializer(serializers.Serializer):
                     description=description,
                     rental_fee=rental_fee,
                     deposit_amount=deposit_amount,
-                    status='ACTIVE',
-                    published_at=now,
+                    status='PENDING',
+                    published_at=None,
                     created_at=now,
                     updated_at=now,
                 )
@@ -564,14 +564,17 @@ class BookWriteSerializer(serializers.Serializer):
             status__in=('PENDING', 'ACTIVE', 'RESERVED'),
         ).first()
         lend_listing = book.lend_listings.filter(
-            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+            status__in=('PENDING', 'ACTIVE', 'RESERVED', 'ON_LOAN'),
         ).first()
         listing_type = 'BUY' if sale_listing is not None else 'BORROW'
         if sale_listing is None and lend_listing is None:
             raise serializers.ValidationError({'status': 'Tin đăng không còn hoạt động.'})
         if (
             (sale_listing is not None and sale_listing.status == 'RESERVED')
-            or (lend_listing is not None and lend_listing.status != 'ACTIVE')
+            or (
+                lend_listing is not None
+                and lend_listing.status not in ('PENDING', 'ACTIVE')
+            )
         ):
             raise serializers.ValidationError({
                 'status': 'Không thể sửa tin đang được giữ hoặc cho mượn.',

@@ -400,6 +400,7 @@ def transition_borrow_order(borrow_order_id, actor, action):
         recipient_id = borrow_order.borrower_id
     elif action == 'reject':
         _require_borrow_status(borrow_order, 'PENDING')
+        _cancel_borrow_order_payments(borrow_order, actor, now)
         borrow_order.status = 'REJECTED'
         borrow_order.order.status = 'CANCELLED'
         borrow_order.order.updated_at = now
@@ -468,6 +469,7 @@ def transition_borrow_order(borrow_order_id, actor, action):
         if actor.id != borrow_order.borrower_id:
             raise PermissionDenied('Chỉ người mượn mới được hủy yêu cầu.')
         _require_borrow_status(borrow_order, 'PENDING')
+        _cancel_borrow_order_payments(borrow_order, actor, now)
         borrow_order.status = 'CANCELLED'
         borrow_order.order.status = 'CANCELLED'
         borrow_order.order.updated_at = now
@@ -495,6 +497,43 @@ def transition_borrow_order(borrow_order_id, actor, action):
         now,
     )
     return borrow_order
+
+
+def _cancel_borrow_order_payments(borrow_order, actor, now):
+    payments = Payment.objects.select_for_update().filter(order=borrow_order.order)
+    for payment in payments:
+        if payment.status in ('PENDING', 'PROCESSING'):
+            payment.status = 'CANCELLED'
+            payment.updated_at = now
+            payment.save(update_fields=['status', 'updated_at'])
+            continue
+        if payment.status != 'PAID':
+            continue
+        previous_refunds = Refund.objects.select_for_update().filter(
+            payment=payment,
+            status__in=('REQUESTED', 'APPROVED', 'COMPLETED'),
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        amount = payment.amount - previous_refunds
+        if amount <= 0:
+            continue
+        idempotency_key = hashlib.sha256(
+            f'borrow-cancel:{borrow_order.id}:{payment.id}'.encode(),
+        ).hexdigest()
+        Refund.objects.create(
+            order=borrow_order.order,
+            payment=payment,
+            borrow_order=borrow_order,
+            provider=payment.provider,
+            idempotency_key=idempotency_key,
+            reason='BORROW_CANCELLED',
+            amount=amount,
+            currency=payment.currency,
+            status='REQUESTED',
+            requested_by=actor,
+            requested_at=now,
+            created_at=now,
+            updated_at=now,
+        )
 
 
 def _require_borrow_status(borrow_order, expected):

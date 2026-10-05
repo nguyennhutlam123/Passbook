@@ -22,21 +22,6 @@ function renderApiBookCard(book) {
     return renderBookCard(book);
 }
 
-function bindBorrowButtons(root) {
-    root.querySelectorAll("[data-borrow-request]").forEach((button) => {
-        button.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (!PassbookGuards.requireAuth()) return;
-            openBorrowReservationDialog({
-                bookId: button.dataset.bookId,
-                listingId: button.dataset.borrowRequest,
-                title: button.dataset.title,
-            });
-        });
-    });
-}
-
 function currentCatalogParams(page) {
     const params = {page, page_size: 10};
     for (const [selector, key] of catalogFilters) {
@@ -90,6 +75,7 @@ async function loadBooks(page = 1) {
     const grid = document.querySelector("[data-catalog-grid]");
     const empty = document.querySelector("[data-catalog-empty]");
     const error = document.querySelector("[data-filter-error]");
+    const catalogLayout = document.querySelector(".catalog-layout");
     const params = currentCatalogParams(page);
     const minPrice = Number(params.min_price);
     const maxPrice = Number(params.max_price);
@@ -98,6 +84,9 @@ async function loadBooks(page = 1) {
         return;
     }
     error.textContent = "";
+    catalogLayout?.classList.remove("catalog-layout--empty");
+    empty.hidden = true;
+    grid.hidden = false;
     syncCatalogUrl(page);
     grid.innerHTML = '<div class="loading-state" role="status">Đang tải sách...</div>';
     try {
@@ -131,10 +120,15 @@ async function loadBooks(page = 1) {
         } : listing);
         grid.innerHTML = books.map(renderApiBookCard).join("");
         bindFavoriteButtons(grid);
+        if (!borrowCatalog) bindSaleButtons(grid);
         if (borrowCatalog) bindBorrowButtons(grid);
         attachImageFallbacks(grid);
         grid.hidden = !books.length;
         empty.hidden = Boolean(books.length);
+        catalogLayout?.classList.toggle(
+            "catalog-layout--empty",
+            borrowCatalog && books.length === 0,
+        );
         document.querySelector("[data-result-count]").textContent = `${data.count} sách`;
         const pagination = document.querySelector("[data-pagination]");
         pagination.replaceChildren();
@@ -156,7 +150,11 @@ async function loadBooks(page = 1) {
         }
     } catch (requestError) {
         if (requestId !== catalogRequestId) return;
-        grid.replaceChildren(PassbookCommonComponents.emptyState("Không thể tải sách.", requestError.message));
+        catalogLayout?.classList.remove("catalog-layout--empty");
+        grid.replaceChildren(PassbookCommonComponents.emptyStateElement(
+            "Không thể tải sách.",
+            requestError.message,
+        ));
         empty.hidden = true;
         const retry = document.createElement("button");
         retry.className = "button button-outline";

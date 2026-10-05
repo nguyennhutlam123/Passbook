@@ -42,7 +42,6 @@ admin.site.register((
     BookIdentifier,
     Book,
     BookImage,
-    LendListing,
     BorrowTerms,
     BookRequest,
     RequestInterest,
@@ -61,6 +60,46 @@ admin.site.register((
     Review,
     Favorite,
 ))
+
+
+@admin.register(LendListing)
+class LendListingAdmin(admin.ModelAdmin):
+    list_display = ('id', 'title', 'lender', 'rental_fee', 'status', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('title', 'description', 'lender__email', 'lender__full_name')
+    actions = ('approve_pending', 'reject_pending')
+
+    @admin.action(description='Approve selected pending lend listings')
+    def approve_pending(self, request, queryset):
+        now = timezone.now()
+        updated = queryset.filter(status='PENDING').update(
+            status='ACTIVE',
+            published_at=now,
+            updated_at=now,
+        )
+        self._report_moderation_result(request, updated, 'approved')
+
+    @admin.action(description='Reject selected pending lend listings')
+    def reject_pending(self, request, queryset):
+        updated = queryset.filter(status='PENDING').update(
+            status='REJECTED',
+            updated_at=timezone.now(),
+        )
+        self._report_moderation_result(request, updated, 'rejected')
+
+    def _report_moderation_result(self, request, updated, action):
+        if updated:
+            self.message_user(
+                request,
+                f'{updated} lend listing(s) {action}.',
+                level=messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                'No pending lend listings were changed.',
+                level=messages.WARNING,
+            )
 
 
 @admin.register(Order)

@@ -800,6 +800,9 @@ class AdminShipmentStatusView(APIView):
         )
         borrow = BorrowOrder.objects.select_for_update().filter(
             order_id=shipment.order_id,
+        ).select_related(
+            'lend_listing',
+            'lend_listing__book',
         ).first()
         old_status = shipment.status
         event, old_status = update_shipment_status(

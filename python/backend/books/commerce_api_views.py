@@ -1,5 +1,6 @@
 import hashlib
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
@@ -75,6 +76,12 @@ def _query_integer(params, name):
     return parsed
 
 
+def checkout_payment_method(requested_method, sale_groups, borrow_lines):
+    if borrow_lines and not sale_groups:
+        return 'COD'
+    return requested_method
+
+
 def _query_decimal(params, name):
     value = params.get(name)
     if value in (None, ''):
@@ -111,6 +118,7 @@ def cart_payload(cart):
             'sale_listing__seller__university',
             'lend_listing__book__book_edition__book_work',
             'lend_listing__lender__university',
+            'lend_listing__borrow_terms',
         ).prefetch_related(
             Prefetch(
                 'sale_listing__book__images',
@@ -142,8 +150,25 @@ def cart_payload(cart):
             'book_id': book.id,
             'title': listing.title,
             'unit_price': str(unit_price),
+            'rental_fee': (
+                str(listing.rental_fee) if item.lend_listing_id else None
+            ),
+            'deposit_amount': (
+                str(listing.deposit_amount or Decimal('0'))
+                if item.lend_listing_id else None
+            ),
             'currency': listing.currency,
             'condition_status': book.condition_label,
+            'borrow_terms': (
+                {
+                    'max_days': listing.borrow_terms.max_days,
+                    'deposit_required': listing.borrow_terms.deposit_required,
+                    'shipping_paid_by': listing.borrow_terms.shipping_paid_by,
+                    'return_method': listing.borrow_terms.return_method,
+                }
+                if item.lend_listing_id and hasattr(listing, 'borrow_terms')
+                else None
+            ),
             'seller': {
                 'id': seller.id,
                 'name': seller.full_name,
@@ -200,9 +225,19 @@ class CartItemListCreateView(APIView):
             lend_listing = None
             price = listing.price
         else:
-            raise serializers.ValidationError({
-                'listing_type': 'Tin cho mượn phải được đăng ký qua yêu cầu mượn, không thêm vào giỏ.',
-            })
+            listing = get_object_or_404(
+                LendListing.objects.select_related('book').filter(
+                    Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+                ),
+                pk=listing_id,
+                status='ACTIVE',
+                book__status='AVAILABLE',
+            )
+            if listing.lender_id == request.user.id:
+                raise serializers.ValidationError('Không thể mượn sách do chính bạn đăng.')
+            sale_listing = None
+            lend_listing = listing
+            price = listing.rental_fee + (listing.deposit_amount or Decimal('0'))
 
         cart = active_cart_for(request.user)
         now = timezone.now()
@@ -266,9 +301,19 @@ class CartItemDetailView(APIView):
             item.lend_listing = None
             item.unit_price = listing.price
         else:
-            raise serializers.ValidationError({
-                'listing_type': 'Tin cho mượn không thuộc giỏ hàng.',
-            })
+            listing = get_object_or_404(
+                LendListing.objects.filter(
+                    Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
+                ),
+                pk=data['listing_id'],
+                status='ACTIVE',
+                book__status='AVAILABLE',
+            )
+            if listing.lender_id == request.user.id:
+                raise serializers.ValidationError('Không thể mượn sách do chính bạn đăng.')
+            item.sale_listing = None
+            item.lend_listing = listing
+            item.unit_price = listing.rental_fee + (listing.deposit_amount or Decimal('0'))
         item.updated_at = timezone.now()
         item.save(update_fields=[
             'sale_listing', 'lend_listing', 'unit_price', 'updated_at',
@@ -314,7 +359,7 @@ class CheckoutView(APIView):
         except (InvalidOperation, ValueError) as exc:
             raise serializers.ValidationError('Cấu hình tỷ lệ phí không hợp lệ.') from exc
         split = calculate_payment_split(line['amount'], fee_rate)
-        return Response({
+        quote = {
             'cart_item_id': item.id,
             'items': [{
                 'title': line['listing'].title,
@@ -330,7 +375,14 @@ class CheckoutView(APIView):
             'seller_earnings': str(split['seller_amount']),
             'total_amount': str(split['amount']),
             'currency': line['listing'].currency,
-        })
+        }
+        if line.get('listing_type') == 'BORROW':
+            quote['listing_type'] = 'BORROW'
+            quote['borrow_terms'] = {
+                'max_days': line['terms'].max_days,
+                'deposit_required': line['terms'].deposit_required,
+            }
+        return Response(quote)
 
     @transaction.atomic
     def post(self, request):
@@ -375,6 +427,7 @@ class CheckoutView(APIView):
         shipping_snapshot = address_serializer.validated_data
         now = timezone.now()
         sale_groups = defaultdict(list)
+        borrow_lines = []
         for item in items:
             if item.sale_listing_id:
                 pending_transfer = SaleOrderItem.objects.filter(
@@ -401,17 +454,51 @@ class CheckoutView(APIView):
                     raise serializers.ValidationError('Không thể mua sách do chính bạn đăng bán.')
                 sale_groups[listing.seller_id].append((item, listing))
             elif item.lend_listing_id:
-                raise serializers.ValidationError(
-                    'Tin cho mượn không thể thanh toán qua Cart/Order; hãy tạo yêu cầu mượn.',
-                )
+                listing = LendListing.objects.select_for_update().select_related(
+                    'book', 'lender',
+                ).filter(
+                    Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+                ).filter(
+                    pk=item.lend_listing_id,
+                    status='ACTIVE',
+                    book__status='AVAILABLE',
+                ).first()
+                if listing is None:
+                    raise serializers.ValidationError('Tin cho mượn này không còn khả dụng.')
+                if listing.lender_id == request.user.id:
+                    raise serializers.ValidationError('Không thể mượn sách do chính bạn đăng.')
+                try:
+                    terms = BorrowTerms.objects.get(lend_listing=listing)
+                except BorrowTerms.DoesNotExist as exc:
+                    raise serializers.ValidationError(
+                        'Tin cho mượn chưa có điều khoản hợp lệ.',
+                    ) from exc
+                borrow_lines.append((item, listing, terms))
             else:
                 raise serializers.ValidationError('Cart item không có listing hợp lệ.')
 
+        requested_borrow = data.get('borrow', {})
+        self._validate_borrow_dates(borrow_lines, requested_borrow, now)
+
         subtotal = sum(
-            (listing.price for group in sale_groups.values() for _, listing in group),
+            (
+                listing.price
+                for group in sale_groups.values()
+                for _, listing in group
+            ),
+            Decimal('0'),
+        ) + sum(
+            (
+                listing.rental_fee + (listing.deposit_amount or Decimal('0'))
+                for _, listing, _ in borrow_lines
+            ),
             Decimal('0'),
         )
-        payment_method = data['payment_method']
+        payment_method = checkout_payment_method(
+            data['payment_method'],
+            sale_groups,
+            borrow_lines,
+        )
         try:
             fee_rate = Decimal(getattr(settings, 'PASSBOOK_PLATFORM_FEE_RATE', '0.10'))
         except (InvalidOperation, ValueError) as exc:
@@ -423,6 +510,15 @@ class CheckoutView(APIView):
                     fee_rate,
                 )['amount']
                 for group in sale_groups.values()
+            ),
+            Decimal('0'),
+        ) + sum(
+            (
+                calculate_payment_split(
+                    listing.rental_fee + (listing.deposit_amount or Decimal('0')),
+                    fee_rate,
+                )['amount']
+                for _, listing, _ in borrow_lines
             ),
             Decimal('0'),
         )
@@ -484,18 +580,36 @@ class CheckoutView(APIView):
                     'discount_total': '0',
                     'platform_fee_rate': str(fee_rate),
                     'platform_fee': str(sum(
-                        calculate_payment_split(
-                            sum((listing.price for _, listing in group), Decimal('0')),
-                            fee_rate,
-                        )['platform_fee']
-                        for group in sale_groups.values()
+                        [
+                            calculate_payment_split(
+                                sum((listing.price for _, listing in group), Decimal('0')),
+                                fee_rate,
+                            )['platform_fee']
+                            for group in sale_groups.values()
+                        ] + [
+                            calculate_payment_split(
+                                listing.rental_fee + (listing.deposit_amount or Decimal('0')),
+                                fee_rate,
+                            )['platform_fee']
+                            for _, listing, _ in borrow_lines
+                        ],
+                        Decimal('0'),
                     )),
                     'seller_earnings': str(sum(
-                        calculate_payment_split(
-                            sum((listing.price for _, listing in group), Decimal('0')),
-                            fee_rate,
-                        )['seller_amount']
-                        for group in sale_groups.values()
+                        [
+                            calculate_payment_split(
+                                sum((listing.price for _, listing in group), Decimal('0')),
+                                fee_rate,
+                            )['seller_amount']
+                            for group in sale_groups.values()
+                        ] + [
+                            calculate_payment_split(
+                                listing.rental_fee + (listing.deposit_amount or Decimal('0')),
+                                fee_rate,
+                            )['seller_amount']
+                            for _, listing, _ in borrow_lines
+                        ],
+                        Decimal('0'),
                     )),
                     'total_amount': str(total_amount),
                     'currency': 'VND',
@@ -559,6 +673,78 @@ class CheckoutView(APIView):
                         listing.book.updated_at = now
                         listing.book.save(update_fields=['status', 'updated_at'])
 
+            for _, listing, terms in borrow_lines:
+                amount = listing.rental_fee + (listing.deposit_amount or Decimal('0'))
+                split = calculate_payment_split(amount, fee_rate)
+                order = Order.objects.create(
+                    order_code=f'ORD-{uuid4().hex[:24].upper()}',
+                    checkout_group=checkout,
+                    buyer=request.user,
+                    seller=listing.lender,
+                    order_type='BORROW',
+                    status=order_status,
+                    currency=listing.currency,
+                    subtotal=amount,
+                    shipping_fee=Decimal('0'),
+                    discount_amount=Decimal('0'),
+                    total_amount=split['amount'],
+                    shipping_address_snapshot=shipping_snapshot,
+                    pricing_snapshot={
+                        'subtotal': str(amount),
+                        'platform_fee_rate': str(split['platform_fee_rate']),
+                        'platform_fee': str(split['platform_fee']),
+                        'seller_earnings': str(split['seller_amount']),
+                        'customer_total': str(split['amount']),
+                        'shipping_fee': '0',
+                        'rental_fee': str(listing.rental_fee),
+                        'deposit_amount': str(listing.deposit_amount or Decimal('0')),
+                        'total_amount': str(split['amount']),
+                        'currency': listing.currency,
+                    },
+                    placed_at=now,
+                    created_at=now,
+                    updated_at=now,
+                    completed_at=None,
+                )
+                BorrowOrder.objects.create(
+                    order=order,
+                    checkout_group=checkout,
+                    lend_listing=listing,
+                    lender=listing.lender,
+                    borrower=request.user,
+                    status=(
+                        'CONFIRMED'
+                        if order_status == 'CONFIRMED'
+                        else 'PENDING'
+                    ),
+                    borrow_terms_snapshot={
+                        'max_days': terms.max_days,
+                        'late_fee_per_day': (
+                            str(terms.late_fee_per_day)
+                            if terms.late_fee_per_day is not None else None
+                        ),
+                        'deposit_required': terms.deposit_required,
+                        'shipping_paid_by': terms.shipping_paid_by,
+                        'return_method': terms.return_method,
+                        'notes': terms.notes,
+                    },
+                    expected_start_at=requested_borrow[str(listing.id)]['expected_start_at'],
+                    expected_return_at=requested_borrow[str(listing.id)]['expected_return_at'],
+                    rental_fee=listing.rental_fee,
+                    deposit_amount=listing.deposit_amount or Decimal('0'),
+                    return_method=terms.return_method,
+                    currency=listing.currency,
+                    created_at=now,
+                    updated_at=now,
+                )
+                listing.status = 'RESERVED'
+                listing.updated_at = now
+                listing.save(update_fields=['status', 'updated_at'])
+                listing.book.status = 'RESERVED'
+                listing.book.updated_at = now
+                listing.book.save(update_fields=['status', 'updated_at'])
+                created_orders.append((order, amount))
+
             for order, amount in created_orders:
                 split = calculate_payment_split(amount, fee_rate)
                 payment_idempotency_key = hashlib.sha256(
@@ -581,7 +767,7 @@ class CheckoutView(APIView):
                     order=order,
                     payer=request.user,
                     provider=payment_provider_name,
-                    payment_method=data['payment_method'],
+                    payment_method=payment_method,
                     provider_transaction_code=provider_reference,
                     payment_purpose='CHECKOUT',
                     amount=split['amount'],
@@ -599,15 +785,31 @@ class CheckoutView(APIView):
                     create_pending_shipment(order, created_at=now)
                 notify_order_parties(
                     order,
-                    title=f'Đặt hàng thành công · {order.order_code}',
+                    title=(
+                        f'Yêu cầu mượn sách · {order.order_code}'
+                        if order.order_type == 'BORROW'
+                        else f'Đặt hàng thành công · {order.order_code}'
+                    ),
                     content=(
-                        'Đơn hàng đã được tạo và thanh toán thành công.'
+                        (
+                            'Yêu cầu mượn đã được tạo; Admin sẽ tiếp nhận và cập nhật trạng thái giao hàng.'
+                            if order.order_type == 'BORROW'
+                            else 'Đơn hàng đã được tạo và thanh toán thành công.'
+                        )
                         if payment_status == 'PAID'
                         else (
-                            'Đơn hàng COD đã được tạo; tiền sẽ thu khi giao hàng. '
-                            'Xác nhận thu tiền COD chưa được hỗ trợ.'
+                            (
+                                'Yêu cầu mượn đã được tạo; COD sẽ được thu khi Admin giao sách.'
+                                if order.order_type == 'BORROW'
+                                else 'Đơn hàng COD đã được tạo; tiền sẽ thu khi giao hàng. '
+                                'Xác nhận thu tiền COD chưa được hỗ trợ.'
+                            )
                             if payment_method == 'COD'
-                            else 'Đơn hàng đang chờ Admin xác minh chuyển khoản.'
+                            else (
+                                'Yêu cầu mượn đang chờ Admin xác minh chuyển khoản.'
+                                if order.order_type == 'BORROW'
+                                else 'Đơn hàng đang chờ Admin xác minh chuyển khoản.'
+                            )
                         )
                     ),
                 )
@@ -621,6 +823,33 @@ class CheckoutView(APIView):
             cart.updated_at = now
             cart.save(update_fields=['status', 'updated_at'])
         return Response(checkout_payload(checkout), status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _validate_borrow_dates(borrow_lines, requested_borrow, now):
+        expected_borrow_ids = {str(listing.id) for _, listing, _ in borrow_lines}
+        if set(requested_borrow) != expected_borrow_ids:
+            raise serializers.ValidationError({
+                'borrow': 'Cần chọn ngày mượn và ngày trả cho từng tin cho mượn.',
+            })
+        for _, listing, terms in borrow_lines:
+            dates = requested_borrow[str(listing.id)]
+            if dates['expected_start_at'] <= now:
+                raise serializers.ValidationError({
+                    'borrow': f"Ngày bắt đầu mượn '{listing.title}' phải ở tương lai.",
+                })
+            if dates['expected_return_at'] <= dates['expected_start_at']:
+                raise serializers.ValidationError({
+                    'borrow': f"Ngày trả '{listing.title}' phải sau ngày bắt đầu.",
+                })
+            if dates['expected_return_at'] - dates['expected_start_at'] > timedelta(
+                days=terms.max_days,
+            ):
+                raise serializers.ValidationError({
+                    'borrow': (
+                        f"Thời hạn mượn '{listing.title}' tối đa "
+                        f'{terms.max_days} ngày.'
+                    ),
+                })
 
     @staticmethod
     def _checkout_line(item, user):
@@ -637,11 +866,41 @@ class CheckoutView(APIView):
                 raise serializers.ValidationError('Sách này không còn khả dụng.')
             if listing.seller_id == user.id:
                 raise serializers.ValidationError('Không thể mua sách do chính bạn đăng bán.')
-            return {'listing': listing, 'unit_price': listing.price, 'amount': listing.price}
+            return {
+                'listing_type': 'SALE',
+                'listing': listing,
+                'unit_price': listing.price,
+                'amount': listing.price,
+            }
 
-        raise serializers.ValidationError(
-            'Tin cho mượn phải được đăng ký qua yêu cầu mượn, không qua Cart/Checkout.',
-        )
+        if item.lend_listing_id:
+            listing = LendListing.objects.select_related('book', 'lender').filter(
+                pk=item.lend_listing_id,
+                status='ACTIVE',
+                book__status='AVAILABLE',
+            ).filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+            ).first()
+            if listing is None:
+                raise serializers.ValidationError('Tin cho mượn này không còn khả dụng.')
+            if listing.lender_id == user.id:
+                raise serializers.ValidationError('Không thể mượn sách do chính bạn đăng.')
+            try:
+                terms = BorrowTerms.objects.get(lend_listing=listing)
+            except BorrowTerms.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    'Tin cho mượn chưa có điều khoản hợp lệ.',
+                ) from exc
+            amount = listing.rental_fee + (listing.deposit_amount or Decimal('0'))
+            return {
+                'listing_type': 'BORROW',
+                'listing': listing,
+                'terms': terms,
+                'unit_price': amount,
+                'amount': amount,
+            }
+
+        raise serializers.ValidationError('Cart item không có listing hợp lệ.')
 
     @staticmethod
     def _shipping_snapshot(user, data):
@@ -660,6 +919,11 @@ class CheckoutView(APIView):
         return data.get('shipping_address_snapshot', {})
 
 
+class BorrowCheckoutDatesSerializer(serializers.Serializer):
+    expected_start_at = serializers.DateTimeField()
+    expected_return_at = serializers.DateTimeField()
+
+
 class CheckoutInputSerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(max_length=128, allow_blank=False, trim_whitespace=True)
     cart_item_id = serializers.IntegerField(required=False, min_value=1)
@@ -673,6 +937,16 @@ class CheckoutInputSerializer(serializers.Serializer):
         choices=('ONLINE', 'FAKE', 'COD', 'BANK_TRANSFER'),
         default='ONLINE',
     )
+    borrow = serializers.DictField(
+        child=BorrowCheckoutDatesSerializer(),
+        required=False,
+        default=dict,
+    )
+
+    def validate_borrow(self, value):
+        if any(not str(listing_id).isdecimal() for listing_id in value):
+            raise serializers.ValidationError('Mã tin cho mượn không hợp lệ.')
+        return value
 
 
 class CheckoutAddressInputSerializer(serializers.Serializer):
@@ -686,17 +960,8 @@ class CheckoutAddressInputSerializer(serializers.Serializer):
 
 
 class CartItemInputSerializer(serializers.Serializer):
-    listing_type = serializers.ChoiceField(choices=('SALE',))
+    listing_type = serializers.ChoiceField(choices=('SALE', 'BORROW'))
     listing_id = serializers.IntegerField(min_value=1)
-
-
-class ReservationInputSerializer(serializers.Serializer):
-    expires_at = serializers.DateTimeField()
-
-    def validate_expires_at(self, value):
-        if value <= timezone.now():
-            raise serializers.ValidationError('Thời hạn đặt sách phải ở tương lai.')
-        return value
 
 
 class LendListingListCreateView(APIView):
@@ -955,7 +1220,7 @@ class LendListingListCreateView(APIView):
         )
         if LendListing.objects.filter(
             book=book,
-            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+            status__in=('PENDING', 'ACTIVE', 'RESERVED', 'ON_LOAN'),
         ).exists():
             raise serializers.ValidationError('Sách đã có tin cho mượn đang hoạt động.')
         if SaleListing.objects.filter(
@@ -970,10 +1235,10 @@ class LendListingListCreateView(APIView):
                 lender=request.user,
                 title=data.get('title') or book.book_edition.book_work.title,
                 description=data.get('description'),
-                status='ACTIVE',
+                status='PENDING',
                 deposit_amount=data.get('deposit_amount'),
                 rental_fee=data['rental_fee'],
-                published_at=now,
+                published_at=None,
                 created_at=now,
                 updated_at=now,
             )
@@ -1425,65 +1690,9 @@ class BookReservationListCreateView(APIView):
 
     @transaction.atomic
     def post(self, request, book_id):
-        serializer = ReservationInputSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        book = get_object_or_404(
-            Book.objects.select_for_update(),
-            pk=book_id,
+        raise serializers.ValidationError(
+            'Yêu cầu mượn phải được tạo và thanh toán qua giỏ hàng.',
         )
-        if book.owner_id == request.user.id:
-            raise serializers.ValidationError('Không thể đặt sách do chính bạn sở hữu.')
-        if BookReservation.objects.filter(
-            book=book,
-            status__in=('PENDING', 'CONFIRMED'),
-        ).exists():
-            raise serializers.ValidationError('Sách đã có một yêu cầu đặt còn hiệu lực.')
-        if book.status != 'AVAILABLE':
-            raise serializers.ValidationError('Sách hiện không khả dụng.')
-        listing = LendListing.objects.select_for_update().filter(
-            book=book,
-            status='ACTIVE',
-        ).filter(
-            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
-        ).first()
-        if listing is None:
-            if SaleListing.objects.filter(
-                book=book,
-                status='ACTIVE',
-            ).exists():
-                raise serializers.ValidationError(
-                    'Tin BUY không thể tạo yêu cầu mượn.',
-                )
-            raise serializers.ValidationError('Sách hiện không có tin cho mượn khả dụng.')
-        if BookReservation.objects.filter(
-            book=book,
-            status__in=('PENDING', 'CONFIRMED'),
-        ).exists():
-            raise serializers.ValidationError('Sách đã có một yêu cầu đặt còn hiệu lực.')
-        now = timezone.now()
-        try:
-            with transaction.atomic():
-                reservation = BookReservation.objects.create(
-                    book=book,
-                    requester=request.user,
-                    owner_id=book.owner_id,
-                    status='PENDING',
-                    created_at=now,
-                    expires_at=serializer.validated_data['expires_at'],
-                    updated_at=now,
-                )
-                listing.status = 'RESERVED'
-                listing.updated_at = now
-                listing.save(update_fields=['status', 'updated_at'])
-                book.status = 'RESERVED'
-                book.updated_at = now
-                book.save(update_fields=['status', 'updated_at'])
-        except IntegrityError as exc:
-            raise serializers.ValidationError(
-                'Sách vừa được người khác đặt; hãy tải lại danh sách.',
-            ) from exc
-        reservation._is_borrow = True
-        return Response(reservation_payload(reservation), status=status.HTTP_201_CREATED)
 
 
 class BookReservationActionView(APIView):
@@ -1493,7 +1702,14 @@ class BookReservationActionView(APIView):
     def post(self, request, reservation_id, action):
         if action not in self.ACTIONS:
             raise serializers.ValidationError({'action': 'Thao tác không hợp lệ.'})
-        get_object_or_404(BookReservation, pk=reservation_id)
+        reservation = get_object_or_404(BookReservation, pk=reservation_id)
+        if LendListing.objects.filter(
+            book_id=reservation.book_id,
+            status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
+        ).exists():
+            raise serializers.ValidationError(
+                'Yêu cầu mượn cũ đã được thay bằng phiếu mượn trong giỏ hàng.',
+            )
         reservation = transition_reservation(
             reservation_id,
             request.user,
@@ -1890,7 +2106,11 @@ class RefundInputSerializer(serializers.Serializer):
         return attrs
 
 def checkout_payload(checkout):
-    orders = list(checkout.orders.prefetch_related('payments').order_by('id'))
+    orders = list(
+        checkout.orders.select_related('borrow_order')
+        .prefetch_related('payments')
+        .order_by('id')
+    )
     return {
         'id': checkout.id,
         'checkout_code': checkout.checkout_code,
@@ -1922,6 +2142,10 @@ def checkout_payload(checkout):
                 'payment_reference': next(
                     (payment.provider_transaction_code for payment in order.payments.all()),
                     None,
+                ),
+                'borrow_order_id': (
+                    order.borrow_order.id
+                    if order.order_type == 'BORROW' else None
                 ),
             }
             for order in orders
@@ -2271,6 +2495,11 @@ class BorrowOrderListView(APIView):
                 ).order_by('id'),
                 to_attr='borrow_shipments',
             ),
+            Prefetch(
+                'refunds',
+                queryset=Refund.objects.order_by('-created_at', '-id'),
+                to_attr='borrow_refunds',
+            ),
         ).order_by('-created_at', '-id')
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
@@ -2281,17 +2510,35 @@ class BorrowOrderListView(APIView):
 
     @staticmethod
     def _borrow_payload(borrow):
-        return_shipment = next(
-            (
-                shipment
-                for shipment in getattr(borrow.order, 'borrow_shipments', ())
-                if (
-                    borrow.return_tracking_code
-                    and shipment.tracking_code == borrow.return_tracking_code
-                )
-            ),
+        shipments = getattr(borrow.order, 'borrow_shipments', ())
+        return_shipment = next((
+            shipment for shipment in shipments
+            if borrow.return_tracking_code
+            and shipment.tracking_code == borrow.return_tracking_code
+        ), None)
+        outbound_shipment = next(
+            (shipment for shipment in shipments if shipment is not return_shipment),
             None,
         )
+
+        def shipment_payload(shipment, direction):
+            return {
+                'id': shipment.id,
+                'direction': direction,
+                'status': shipment.status,
+                'carrier': shipment.carrier,
+                'tracking_code': shipment.tracking_code,
+                'tracking': [
+                    {
+                        'status': entry.status,
+                        'location': entry.location,
+                        'description': entry.description,
+                        'occurred_at': entry.occurred_at,
+                    }
+                    for entry in shipment.tracking_events.all()
+                ],
+            }
+
         return {
             'id': borrow.id,
             'order_id': borrow.order_id,
@@ -2322,24 +2569,20 @@ class BorrowOrderListView(APIView):
             'return_tracking_code': borrow.return_tracking_code,
             'return_requested_at': borrow.return_requested_at,
             'return_approved_at': borrow.return_approved_at,
-            'return_notes': borrow.return_notes,
-            'return_shipment': (
+            'refunds': [
                 {
-                    'id': return_shipment.id,
-                    'direction': 'BORROWER_TO_OWNER',
-                    'status': return_shipment.status,
-                    'carrier': return_shipment.carrier,
-                    'tracking_code': return_shipment.tracking_code,
-                    'tracking': [
-                        {
-                            'status': entry.status,
-                            'location': entry.location,
-                            'description': entry.description,
-                            'occurred_at': entry.occurred_at,
-                        }
-                        for entry in return_shipment.tracking_events.all()
-                    ],
+                    'amount': str(refund.amount),
+                    'status': refund.status,
                 }
+                for refund in getattr(borrow, 'borrow_refunds', ())
+            ],
+            'return_notes': borrow.return_notes,
+            'shipment': (
+                shipment_payload(outbound_shipment, 'OWNER_TO_BORROWER')
+                if outbound_shipment else None
+            ),
+            'return_shipment': (
+                shipment_payload(return_shipment, 'BORROWER_TO_OWNER')
                 if return_shipment else None
             ),
         }
@@ -2623,6 +2866,10 @@ class ShipmentListCreateView(APIView):
             borrow.lender_id if borrow else None,
         ):
             raise PermissionDenied('Chỉ người bán mới có thể tạo thông tin giao hàng.')
+        if order.order_type == 'BORROW':
+            raise PermissionDenied(
+                'BORROW Shipment được tạo tự động; Admin vận hành cập nhật giao hàng.',
+            )
         if order.status not in ('CONFIRMED', 'PROCESSING'):
             raise serializers.ValidationError(
                 'Chỉ Order đã thanh toán và chưa hoàn tất mới được tạo Shipment.',
@@ -2670,6 +2917,10 @@ class ShipmentTrackingCreateView(APIView):
         borrow = BorrowOrder.objects.select_for_update().filter(
             order_id=shipment.order_id,
         ).first()
+        if borrow is not None:
+            raise PermissionDenied(
+                'Trạng thái giao phiếu mượn do Admin vận hành cập nhật.',
+            )
         return_shipment = shipment_is_return(shipment, borrow)
         if return_shipment:
             if request.user.id != borrow.borrower_id:

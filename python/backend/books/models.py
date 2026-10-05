@@ -287,7 +287,8 @@ class SaleListing(models.Model):
 
 class LendListing(models.Model):
     STATUS_CHOICES = [
-        ('DRAFT', 'Draft'), ('ACTIVE', 'Active'), ('RESERVED', 'Reserved'),
+        ('DRAFT', 'Draft'), ('PENDING', 'Pending review'), ('ACTIVE', 'Active'),
+        ('REJECTED', 'Rejected'), ('RESERVED', 'Reserved'),
         ('ON_LOAN', 'On loan'), ('CLOSED', 'Closed'), ('EXPIRED', 'Expired'),
     ]
     book = models.ForeignKey(

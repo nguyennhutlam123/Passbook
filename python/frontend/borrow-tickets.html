@@ -14,10 +14,7 @@
             <div><span class="eyebrow">Giao dịch</span><h1>Phiếu mượn</h1></div>
             <a class="button button-outline" href="orders.html">Đơn hàng</a>
         </section>
-        <section class="workspace-section" aria-labelledby="reservations-title">
-            <div class="section-heading"><h2 id="reservations-title">Yêu cầu mượn</h2><button class="button button-outline" type="button" data-reservations-refresh>Cập nhật</button></div>
-            <div class="report-list" data-reservations-list><p class="loading-state">Đang tải yêu cầu...</p></div>
-        </section>
+        <p class="caption">Quy trình: người cho mượn xác nhận hoặc từ chối → chuẩn bị sách → người mượn xác nhận đã nhận → gửi trả → người cho mượn xác nhận đã nhận lại.</p>
         <section class="workspace-section" aria-labelledby="borrow-title">
             <div class="section-heading"><h2 id="borrows-title">Giao dịch mượn</h2><button class="button button-outline" type="button" data-borrows-refresh>Cập nhật</button></div>
             <div class="report-list" data-borrows-list><p class="loading-state">Đang tải phiếu mượn...</p></div>
@@ -26,8 +23,8 @@
     </main>
     <footer class="site-footer" data-site-footer></footer>
     <script src="js/core/storage.js"></script><script src="js/core/errors.js"></script><script src="js/core/auth.js"></script><script src="js/core/router.js"></script><script src="js/core/guards.js"></script>
-    <script src="js/components/common/common.js"></script>
-    <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/reservations-api.js"></script><script src="js/api/orders-api.js?v=borrow-return"></script><script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js"></script><script src="js/workspace.js"></script>
+    <script src="js/components/common/common.js?v=borrow-workflow-20261005"></script>
+    <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/orders-api.js?v=borrow-workflow-20261005"></script><script src="js/api/notifications-api.js"></script>
+    <script src="js/main.js?v=sale-cart-20261005"></script><script src="js/workspace.js?v=borrow-admin-delivery-20261005"></script>
 </body>
 </html>

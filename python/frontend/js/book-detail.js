@@ -237,22 +237,16 @@ document.addEventListener("DOMContentLoaded", async () => {
                 const borrowButton = document.createElement("button");
                 borrowButton.className = "button button-primary";
                 borrowButton.type = "button";
-                borrowButton.textContent = "Mượn ngay";
-                borrowButton.addEventListener("click", () => {
-                    openBorrowReservationDialog({
-                        bookId: book.id,
-                        listingId: book.listing_id,
-                        title: book.title,
-                        onCreated: () => {
-                            book.status = "reserved";
-                            status.textContent = `${availabilityLabels.reserved} · ${conditionLabel}`;
-                            borrowButton.remove();
-                        },
-                    });
-                });
+                borrowButton.textContent = "Tạo phiếu mượn";
+                borrowButton.addEventListener("click", () =>
+                    void addBorrowListingToCart(book.listing_id, borrowButton),
+                );
                 actions.appendChild(borrowButton);
             } else {
-                const findSaleListing = async () => {
+                const findSaleListingId = async () => {
+                    if (Number.isSafeInteger(Number(book.listing_id)) && Number(book.listing_id) > 0) {
+                        return Number(book.listing_id);
+                    }
                     let pageNumber = 1;
                     let listing = null;
                     let hasNext = true;
@@ -274,24 +268,14 @@ document.addEventListener("DOMContentLoaded", async () => {
                             {status: 409, code: "listing_unavailable"},
                         );
                     }
-                    return listing;
+                    return listing.id;
                 };
                 const addToCart = async (button, buyNow) => {
-                    if (!PassbookGuards.requireAuth()) return;
-                    button.disabled = true;
                     try {
-                        const listing = await findSaleListing();
-                        await OrdersAPI.addCartItem({
-                            listing_type: "SALE",
-                            listing_id: listing.id,
-                        });
-                        window.location.assign(buyNow
-                            ? `cart.html?buy_now=${encodeURIComponent(listing.id)}`
-                            : "cart.html");
+                        const listingId = await findSaleListingId();
+                        await addSaleListingToCart(listingId, button, {buyNow});
                     } catch (error) {
                         showToast(error.message);
-                    } finally {
-                        button.disabled = false;
                     }
                 };
                 const cartButton = document.createElement("button");

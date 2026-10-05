@@ -132,13 +132,61 @@ def update_shipment_status(
         'updated_at',
     ])
 
+    order = getattr(shipment, 'order', None)
+    is_borrow_order = (
+        order is not None
+        and getattr(order, 'order_type', None) == 'BORROW'
+    )
+    if status == 'PICKED_UP' and is_borrow_order:
+        if order.status not in ('CONFIRMED', 'PROCESSING'):
+            raise ValidationError(
+                f'Không thể giao BORROW Order ở trạng thái {order.status}.',
+            )
+        if order.status == 'CONFIRMED':
+            previous_order_status = order.status
+            order.status = 'PROCESSING'
+            order.updated_at = now
+            order.save(update_fields=['status', 'updated_at'])
+            notify_order_status_changed(order, previous_order_status)
+
     if status == 'DELIVERED' and is_return_shipment(shipment, borrow):
         borrow.status = 'RETURNED'
         borrow.return_status = 'DELIVERED'
         borrow.updated_at = now
         borrow.save(update_fields=['status', 'return_status', 'updated_at'])
+    elif status == 'DELIVERED' and is_borrow_order:
+        if borrow is None or borrow.status not in ('CONFIRMED', 'READY_FOR_PICKUP'):
+            raise ValidationError(
+                'Phiếu mượn chưa ở trạng thái có thể giao.',
+            )
+        if order.status not in ('CONFIRMED', 'PROCESSING'):
+            raise ValidationError(
+                f'Không thể giao BORROW Order ở trạng thái {order.status}.',
+            )
+        borrow.status = 'ACTIVE'
+        borrow.actual_start_at = occurred_at
+        borrow.updated_at = now
+        borrow.save(update_fields=['status', 'actual_start_at', 'updated_at'])
+        listing = borrow.lend_listing
+        listing.status = 'ON_LOAN'
+        listing.updated_at = now
+        listing.save(update_fields=['status', 'updated_at'])
+        listing.book.status = 'ON_LOAN'
+        listing.book.updated_at = now
+        listing.book.save(update_fields=['status', 'updated_at'])
+        for payment in Payment.objects.select_for_update().filter(order_id=order.id):
+            if payment.payment_method == 'COD' and payment.status != 'PAID':
+                payment.status = 'PAID'
+                payment.paid_at = now
+                payment.updated_at = now
+                payment.save(update_fields=['status', 'paid_at', 'updated_at'])
+        if order.status == 'CONFIRMED':
+            previous_order_status = order.status
+            order.status = 'PROCESSING'
+            order.updated_at = now
+            order.save(update_fields=['status', 'updated_at'])
+            notify_order_status_changed(order, previous_order_status)
     elif status == 'DELIVERED':
-        order = getattr(shipment, 'order', None)
         if order is not None and getattr(order, 'order_type', None) == 'SALE':
             if order.status not in ('CONFIRMED', 'PROCESSING'):
                 raise ValidationError(

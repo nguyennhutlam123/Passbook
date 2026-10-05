@@ -28,6 +28,16 @@ function currentCatalogParams(page) {
         const value = document.querySelector(selector)?.value.trim();
         if (value) params[key] = key === "sort" ? value.replace("-", "_") : value;
     }
+    const urlParams = new URLSearchParams(location.search);
+    if (!params.category_id) {
+        const categoryId = urlParams.get("category_id");
+        const categorySlug = urlParams.get("category_slug");
+        if (categoryId) params.category_id = categoryId;
+        else if (categorySlug) params.category_slug = categorySlug;
+    }
+    if (!params.language && urlParams.has("language_id")) {
+        params.language_id = urlParams.get("language_id");
+    }
     const condition = document.querySelector("input[name='condition']:checked")?.value;
     if (condition) params.condition_status = condition;
     return params;
@@ -38,6 +48,16 @@ function syncCatalogUrl(page) {
     for (const [selector, key, urlKey = key] of catalogFilters) {
         const value = document.querySelector(selector)?.value.trim();
         if (value) params.set(urlKey, value);
+    }
+    const currentUrlParams = new URLSearchParams(location.search);
+    if (!params.has("category_id")) {
+        const categoryId = currentUrlParams.get("category_id");
+        const categorySlug = currentUrlParams.get("category_slug");
+        if (categoryId) params.set("category_id", categoryId);
+        else if (categorySlug) params.set("category_slug", categorySlug);
+    }
+    if (!params.has("language") && currentUrlParams.has("language_id")) {
+        params.set("language_id", currentUrlParams.get("language_id"));
     }
     const condition = document.querySelector("input[name='condition']:checked")?.value;
     if (condition) params.set("condition_status", condition);
@@ -96,18 +116,15 @@ async function loadBooks(page = 1) {
     grid.hidden = false;
     syncCatalogUrl(page);
     grid.innerHTML = '<div class="loading-state" role="status">Đang tải sách...</div>';
+    const favoriteLoad = isLoggedIn() && !borrowCatalog
+        ? loadFavoriteBookIds().catch((favoriteError) => {
+            showToast(favoriteError.message);
+        })
+        : Promise.resolve();
     try {
         const data = borrowCatalog
             ? await BooksAPI.lendListings(params)
             : await BooksAPI.list(params);
-        if (requestId !== catalogRequestId) return;
-        if (isLoggedIn()) {
-            try {
-                await loadFavoriteBookIds();
-            } catch (favoriteError) {
-                showToast(favoriteError.message);
-            }
-        }
         if (requestId !== catalogRequestId) return;
         const books = (data.results || []).map((listing) => borrowCatalog ? {
             ...listing.book,
@@ -129,6 +146,16 @@ async function loadBooks(page = 1) {
         } : listing);
         grid.innerHTML = books.map(renderApiBookCard).join("");
         bindFavoriteButtons(grid);
+        if (isLoggedIn() && !borrowCatalog) {
+            const favoriteButtons = [...grid.querySelectorAll("[data-favorite]")];
+            favoriteButtons.forEach((button) => {
+                button.disabled = true;
+            });
+            void favoriteLoad.then(() => {
+                if (requestId !== catalogRequestId) return;
+                syncFavoriteButtons(grid);
+            });
+        }
         if (!borrowCatalog) bindSaleButtons(grid);
         if (borrowCatalog) bindBorrowButtons(grid);
         attachImageFallbacks(grid);
@@ -240,12 +267,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.querySelector("[data-filter-close]")?.addEventListener("click", () =>
         setFiltersOpen(false),
     );
+    const optionsRequest = loadCatalogOptions();
+    const booksRequest = loadBooks(page);
     try {
-        await loadCatalogOptions();
-        await loadBooks(page);
+        await Promise.all([optionsRequest, booksRequest]);
     } catch (error) {
         document.querySelector("[data-filter-error]").textContent =
             `Không thể tải bộ lọc. ${error.message}`;
-        await loadBooks(page);
     }
 });

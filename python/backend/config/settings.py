@@ -171,6 +171,13 @@ MYSQL_SSL_MODE = os.environ.get('MYSQL_SSL_MODE', 'DISABLED').upper()
 if MYSQL_SSL_MODE not in {'REQUIRED', 'DISABLED'}:
     raise ValueError('MYSQL_SSL_MODE must be REQUIRED or DISABLED.')
 
+try:
+    MYSQL_CONN_MAX_AGE = int(os.environ.get('MYSQL_CONN_MAX_AGE', '60'))
+except ValueError as exc:
+    raise ValueError('MYSQL_CONN_MAX_AGE must be a non-negative integer.') from exc
+if MYSQL_CONN_MAX_AGE < 0:
+    raise ValueError('MYSQL_CONN_MAX_AGE must be a non-negative integer.')
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
@@ -182,6 +189,8 @@ DATABASES = {
         'OPTIONS': {
             'ssl': {'verify_mode': 'none'},
         } if MYSQL_SSL_MODE == 'REQUIRED' else {},
+        'CONN_MAX_AGE': MYSQL_CONN_MAX_AGE,
+        'CONN_HEALTH_CHECKS': True,
     }
 }
 

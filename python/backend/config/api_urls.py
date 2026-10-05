@@ -8,6 +8,8 @@ import urllib.request
 
 import secrets
 
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from django.conf import settings
 from django.http import JsonResponse
 from django.urls import path
@@ -257,6 +259,7 @@ class CloudinaryUploadCleanupView(APIView):
 class CatalogOptionsView(APIView):
     permission_classes = [AllowAny]
 
+    @method_decorator(cache_page(300))
     def get(self, request):
         faculties = Faculty.objects.filter(status='ACTIVE')
         majors = Major.objects.filter(status='ACTIVE')

@@ -9,6 +9,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         container.innerHTML = '<div class="empty-state"><strong>Không tìm thấy mã giáo trình.</strong><a class="button button-primary" href="books.html">Về danh sách</a></div>';
         return;
     }
+    const favoriteLoad = isLoggedIn()
+        ? loadFavoriteBookIds().catch((error) => {
+            showToast(error.message);
+            return null;
+        })
+        : Promise.resolve(null);
+    const intentLoad = listingType === "borrow"
+        ? Promise.resolve({data: null, error: null})
+        : BooksAPI.intentSummary(id).then(
+            (data) => ({data, error: null}),
+            (error) => ({data: null, error}),
+        );
     try {
         let book;
         if (listingType === "borrow") {
@@ -36,13 +48,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         container.querySelector("[data-detail-back]").href =
             book.listing_type === "BORROW" ? "borrow.html" : "books.html";
-        if (isLoggedIn()) {
-            try {
-                await loadFavoriteBookIds();
-            } catch (error) {
-                showToast(error.message);
-            }
-        }
         const images = book.images || [];
         const mainImage = container.querySelector("[data-detail-main-image]");
         const fallbackImage = "https://placehold.co/640x860/f0e5d7/263b4a?text=PASSBOOK";
@@ -92,8 +97,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         }[book.condition_status] || book.condition_label || "Tình trạng chưa rõ";
         status.textContent = `${availabilityLabels[book.status] || "Trạng thái chưa rõ"} · ${conditionLabel}`;
         container.querySelector("[data-detail-title]").textContent = book.title;
+        let favoriteButton = null;
         if (book.listing_type !== "BORROW") {
-            const favoriteButton = document.createElement("button");
+            favoriteButton = document.createElement("button");
             favoriteButton.className = "button button-outline";
             favoriteButton.type = "button";
             const favorite = isFavoriteBook(book.id);
@@ -103,6 +109,12 @@ document.addEventListener("DOMContentLoaded", async () => {
             favoriteButton.dataset.favorite = String(book.id);
             favoriteButton.addEventListener("click", () => toggleFavorite(book.id, favoriteButton));
             container.querySelector("[data-detail-title]").after(favoriteButton);
+            void favoriteLoad.then(() => {
+                const favorite = isFavoriteBook(book.id);
+                favoriteButton.classList.toggle("is-favorite", favorite);
+                favoriteButton.setAttribute("aria-pressed", String(favorite));
+                favoriteButton.textContent = favorite ? "♥ Đã lưu" : "♡ Lưu giáo trình";
+            });
         }
         container.querySelector("[data-detail-price]").textContent = book.listing_type === "BORROW"
             ? `Phí mượn · ${formatPrice(Number(book.price))}`
@@ -206,7 +218,9 @@ document.addEventListener("DOMContentLoaded", async () => {
             intentPanel.hidden = true;
         } else {
             try {
-                renderIntentPanel(await BooksAPI.intentSummary(book.id));
+                const {data, error} = await intentLoad;
+                if (error) throw error;
+                renderIntentPanel(data);
             } catch (intentError) {
                 intentPanel.replaceChildren(PassbookCommonComponents.emptyState(
                     "Không thể tải số người dự định mua/bán.",

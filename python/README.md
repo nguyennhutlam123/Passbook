@@ -72,6 +72,9 @@ python3 -m http.server 5500 --directory frontend
 ```
 
 Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.1:8000/api`.
+Backend giữ kết nối MySQL tối đa 60 giây (`MYSQL_CONN_MAX_AGE`) và kiểm tra kết nối trước
+khi tái sử dụng; giảm giá trị này nếu giới hạn connection của MySQL/Aiven thấp hoặc số worker
+lớn. API bộ lọc catalog được cache 5 phút để tránh đọc lại dữ liệu danh mục ít thay đổi.
 
 ## Database
 

@@ -50,7 +50,7 @@ pip install -r requirements.txt
 
 Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. Khi bật OTP, email OTP và email thông báo dùng Django SMTP qua Gmail (`smtp.gmail.com:587`, TLS). Cấu hình SMTP bằng `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL`; cần Google App Password (không dùng mật khẩu đăng nhập Gmail) và không commit file `.env`. `EMAIL_TIMEOUT` (mặc định 10 giây) giới hạn thời gian chờ.
 
-`OTP_ENABLED` mặc định là `false`. Khi tắt, đăng ký không yêu cầu OTP, đăng nhập chỉ dựa trên mật khẩu hợp lệ, đổi email/số điện thoại vẫn yêu cầu đăng nhập nhưng không yêu cầu OTP; forgot/reset password tạm thời bị khóa cho đến khi có cơ chế xác minh an toàn khác. Các API OTP vẫn có trong backend nhưng trả 503 khi OTP bị tắt. Đặt `OTP_ENABLED=true` để bật lại OTP cùng email/SMS delivery hiện có.
+Đặt rõ `OTP_ENABLED=false` trong Render Environment để khóa OTP production (code cũng mặc định `false` nếu biến chưa được cấu hình). Khi tắt, đăng ký không yêu cầu OTP, đăng nhập chỉ dựa trên mật khẩu hợp lệ, đổi email/số điện thoại vẫn yêu cầu đăng nhập nhưng không yêu cầu OTP; forgot/reset password tạm thời bị khóa cho đến khi có cơ chế xác minh an toàn khác. Các API OTP vẫn có trong backend nhưng trả 503 khi OTP bị tắt. Đặt `OTP_ENABLED=true` để bật lại OTP cùng email/SMS delivery hiện có.
 
 ## Tạo tài khoản kiểm thử
 

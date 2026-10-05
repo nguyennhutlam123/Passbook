@@ -4,19 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tin nhắn - PassBook</title>
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/workspace.css">
+    <link rel="stylesheet" href="css/style.css?v=report-message-20261006">
+    <link rel="stylesheet" href="css/workspace.css?v=report-message-20261006">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
     <main class="page-shell workspace-page" data-messages-page>
         <section class="section-heading">
-            <div><span class="eyebrow">Trao đổi</span><h1>Tin nhắn</h1><p class="text-secondary">Các cuộc hội thoại về sách và giao dịch của bạn.</p></div>
+            <div><span class="eyebrow">Trao đổi riêng tư</span><h1>Tin nhắn</h1><p class="text-secondary">Trò chuyện riêng với từng người mua hoặc người bán.</p></div>
             <a class="button button-outline" href="profile.html">Hồ sơ</a>
         </section>
         <div class="conversation-list" data-conversation-list aria-live="polite">
             <p class="loading-state">Đang tải hội thoại...</p>
         </div>
+        <button class="button button-outline" type="button" data-conversation-more hidden>
+            Xem hội thoại cũ hơn
+        </button>
         <p class="form-error" role="alert" data-messages-error></p>
     </main>
     <footer class="site-footer" data-site-footer></footer>
@@ -26,13 +29,14 @@
     <script src="js/core/router.js"></script>
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js"></script>
-    <script src="js/components/messaging/cards.js"></script>
+    <script src="js/components/messaging/cards.js?v=report-message-20261006"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
     <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js"></script>
-    <script src="js/messages.js"></script>
+    <script src="js/main.js?v=report-message-20261006"></script>
+    <script src="js/messages.js?v=private-chat-20261006"></script>
 </body>
 </html>

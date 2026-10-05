@@ -374,6 +374,11 @@ class SaleListingDetailView(APIView):
         ):
             listing.status = 'PENDING'
             listing.published_at = None
+        elif listing.status == 'ACTIVE' and any(
+            field in data for field in ('title', 'description', 'price')
+        ):
+            listing.status = 'PENDING'
+            listing.published_at = None
         now = timezone.now()
         listing.updated_at = now
         listing.save()

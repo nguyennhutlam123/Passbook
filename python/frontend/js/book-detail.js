@@ -28,6 +28,8 @@ document.addEventListener("DOMContentLoaded", async () => {
                 borrow_terms: listing.borrow_terms,
                 deposit_amount: listing.deposit_amount,
                 reviews: listing.reviews || [],
+                average_rating: listing.average_rating,
+                review_count: listing.review_count,
             };
         } else {
             book = await BooksAPI.get(id);
@@ -144,9 +146,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         container.querySelector("[data-detail-description]").textContent = book.description || "Chưa có mô tả.";
         const reviews = book.reviews || [];
         const reviewPanel = container.querySelector("[data-detail-reviews]");
-        reviewPanel.hidden = reviews.length === 0;
         const reviewTitle = reviewPanel.querySelector("[data-review-title]");
-        reviewTitle.textContent = `Đánh giá sách (${reviews.length})`;
+        const reviewCount = Number(book.review_count ?? reviews.length);
+        const averageRating = Number(book.average_rating);
+        reviewTitle.textContent = `Đánh giá sách (${reviewCount})`;
+        reviewPanel.querySelector("[data-review-summary]").textContent = reviewCount
+            ? `${Number.isFinite(averageRating) ? averageRating.toFixed(1) : "—"} / 5 sao · ${reviewCount} đánh giá`
+            : "Chưa có đánh giá cho sách này.";
         const reviewList = reviewPanel.querySelector("[data-review-list]");
         reviewList.replaceChildren(...(reviews.length
             ? reviews.map((review) => {
@@ -162,7 +168,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 card.append(heading, time, comment);
                 return card;
             })
-            : [PassbookCommonComponents.emptyState("Chưa có đánh giá.")]));
+            : [PassbookCommonComponents.emptyState("Hãy là người đầu tiên đánh giá sau khi hoàn tất giao dịch.")]));
         const intentPanel = container.querySelector("[data-detail-intents]");
         const renderIntentPanel = (summary) => {
             intentPanel.replaceChildren();

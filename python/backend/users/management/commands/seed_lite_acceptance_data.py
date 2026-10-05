@@ -390,7 +390,7 @@ class Command(BaseCommand):
                     ConversationMember(
                         conversation=conversation,
                         user=seller,
-                        joined_at=now + timedelta(microseconds=1),
+                        joined_at=now + timedelta(milliseconds=1),
                         last_read_at=None,
                     ),
                 ])

@@ -186,7 +186,7 @@ document.addEventListener("DOMContentLoaded", () => {
             panel.append(section);
         });
 
-        if (data.status === "COMPLETED") {
+        if (data.can_review) {
             const review = document.createElement("a");
             review.className = "button button-primary";
             review.href = `review.html?order_id=${encodeURIComponent(data.id)}`;

@@ -3,16 +3,34 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!page || !PassbookGuards.requireAuth()) return;
     const list = page.querySelector("[data-conversation-list]");
     const error = page.querySelector("[data-messages-error]");
+    const moreButton = page.querySelector("[data-conversation-more]");
+    let nextPage = 1;
+    let hasMore = false;
+    let requestedConversationOpened = false;
     list.replaceChildren(PassbookCommonComponents.loadingStateElement("Đang tải hội thoại..."));
-    try {
-        const response = await MessagingAPI.conversations();
+
+    const appendConversations = (conversations) => {
+        list.append(...conversations.map((conversation) =>
+            PassbookMessagingComponents.conversationItem(conversation)));
+        list.querySelectorAll("[data-conversation-id]:not([data-listener-attached])")
+            .forEach((item) => {
+                item.dataset.listenerAttached = "true";
+                item.addEventListener("click", () => {
+                    void openConversationModal(item.dataset.conversationId);
+                });
+            });
+    };
+
+    const loadConversations = async (pageNumber) => {
+        const response = await MessagingAPI.conversations({
+            page: pageNumber,
+            page_size: 50,
+        });
         const conversations = Array.isArray(response) ? response : response.results || [];
-        if (conversations.length) {
-            list.replaceChildren(...conversations.map((conversation) => PassbookMessagingComponents.conversationItem(conversation)));
-        } else {
+        if (!conversations.length && pageNumber === 1) {
             const empty = PassbookCommonComponents.emptyStateElement(
                 "Chưa có cuộc hội thoại.",
-                "Khi bạn liên hệ người bán hoặc người mượn, cuộc trò chuyện sẽ xuất hiện tại đây.",
+                "Khi bạn liên hệ người bán hoặc người mua, cuộc trò chuyện riêng sẽ xuất hiện tại đây.",
             );
             const browse = document.createElement("a");
             browse.className = "button button-primary";
@@ -20,17 +38,45 @@ document.addEventListener("DOMContentLoaded", async () => {
             browse.textContent = "Khám phá sách";
             empty.append(browse);
             list.replaceChildren(empty);
+        } else {
+            appendConversations(conversations);
         }
-        list.querySelectorAll("[data-conversation-id]").forEach((item) => item.addEventListener("click", () => {
-            void openConversationModal(item.dataset.conversationId);
-        }));
+        hasMore = Boolean(response.next);
+        nextPage = pageNumber + 1;
+        moreButton.hidden = !hasMore;
+        error.textContent = "";
         const requestedId = new URLSearchParams(location.search).get("conversation_id");
         if (requestedId) {
-            list.querySelector(`[data-conversation-id="${CSS.escape(requestedId)}"]`)?.scrollIntoView({
-                behavior: "smooth",
-                block: "center",
-            });
+            const requestedConversation = list.querySelector(
+                `[data-conversation-id="${CSS.escape(requestedId)}"]`,
+            );
+            if (requestedConversation) {
+                requestedConversation.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                });
+                if (!requestedConversationOpened) {
+                    requestedConversationOpened = true;
+                    void openConversationModal(requestedId);
+                }
+            }
         }
+    };
+
+    moreButton.addEventListener("click", async () => {
+        if (!hasMore) return;
+        moreButton.disabled = true;
+        try {
+            await loadConversations(nextPage);
+        } catch (requestError) {
+            error.textContent = requestError.message;
+        } finally {
+            moreButton.disabled = false;
+        }
+    });
+
+    try {
+        await loadConversations(1);
     } catch (requestError) {
         error.textContent = requestError.message;
         list.replaceChildren(PassbookCommonComponents.emptyStateElement(

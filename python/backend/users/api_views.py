@@ -1,4 +1,6 @@
 from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -202,16 +204,31 @@ class ProfileView(APIView):
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not check_password(serializer.validated_data['old_password'], request.user.password_hash):
+        user = User.objects.select_for_update().get(pk=request.user.id)
+        if not check_password(
+            serializer.validated_data['old_password'],
+            user.password_hash,
+        ):
             return Response(
                 {'detail': 'Mật khẩu hiện tại không đúng.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        user = User.objects.get(pk=request.user.id)
-        user.password_hash = make_password(serializer.validated_data['new_password'])
+        new_password = serializer.validated_data['new_password']
+        if check_password(new_password, user.password_hash):
+            raise serializers.ValidationError({
+                'new_password': 'Mật khẩu mới phải khác mật khẩu hiện tại.',
+            })
+        try:
+            validate_password(new_password, user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({
+                'new_password': exc.messages,
+            }) from exc
+        user.password_hash = make_password(new_password)
         user.updated_at = timezone.now()
         user.save(update_fields=['password_hash', 'updated_at'])
         return Response({'message': 'Đổi mật khẩu thành công.'})

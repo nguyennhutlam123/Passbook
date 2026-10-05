@@ -6,15 +6,37 @@ document.addEventListener("DOMContentLoaded", () => {
     const error = page.querySelector("[data-notification-error]");
     const markAll = page.querySelector("[data-mark-all]");
     let currentPage = 1;
-    let currentData;
+    let unreadCount = 0;
+
+    const notificationTarget = (notification) => {
+        const entityId = Number(notification.reference_id);
+        if (!Number.isSafeInteger(entityId) || entityId < 1) return null;
+        if (notification.entity_type === "ORDER") {
+            return `orders.html?order_id=${encodeURIComponent(entityId)}`;
+        }
+        if (notification.entity_type === "BORROW_ORDER") {
+            return `borrow-tickets.html?borrow_id=${encodeURIComponent(entityId)}`;
+        }
+        if (notification.entity_type === "CONVERSATION") {
+            return `messages.html?conversation_id=${encodeURIComponent(entityId)}`;
+        }
+        if (notification.entity_type === "REPORT") {
+            return `profile.html#reports`;
+        }
+        return null;
+    };
 
     const load = async () => {
         list.replaceChildren(PassbookCommonComponents.loadingState());
         pagination.replaceChildren();
         error.textContent = "";
         try {
-            currentData = await NotificationsAPI.list({page: currentPage, page_size: 10});
+            const currentData = await NotificationsAPI.list({page: currentPage, page_size: 10});
             const notifications = currentData.results || [];
+            unreadCount = Number(currentData.unread_count);
+            if (!Number.isSafeInteger(unreadCount) || unreadCount < 0) {
+                unreadCount = notifications.filter((item) => !item.is_read).length;
+            }
             const nodes = notifications.map((notification) => {
                 const item = PassbookCommonComponents.notificationItem(notification);
                 item.addEventListener("click", async () => {
@@ -23,8 +45,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         if (!notification.is_read) {
                             await NotificationsAPI.markRead(notification.id);
                             notification.is_read = true;
+                            unreadCount = Math.max(0, unreadCount - 1);
                             item.classList.remove("is-unread");
+                            markAll.hidden = unreadCount === 0;
                         }
+                        const target = notificationTarget(notification);
+                        if (target) global.location.assign(target);
                     } catch (requestError) {
                         error.textContent = requestError.message;
                     } finally {
@@ -36,7 +62,11 @@ document.addEventListener("DOMContentLoaded", () => {
             if (nodes.length) {
                 list.replaceChildren(...nodes);
             } else {
-                list.replaceChildren();
+                list.replaceChildren(
+                    PassbookCommonComponents.emptyStateElement(
+                        "Bạn chưa có thông báo nào.",
+                    ),
+                );
             }
             const controls = PassbookCommonComponents.pagination({
                 previous: currentData.previous,
@@ -45,7 +75,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 onNext: () => { currentPage += 1; void load(); },
             });
             pagination.replaceChildren(controls);
-            markAll.hidden = !notifications.some((item) => !item.is_read);
+            markAll.hidden = unreadCount === 0;
         } catch (requestError) {
             const failure = PassbookCommonComponents.emptyStateElement(
                 "Không thể tải thông báo.",
@@ -66,6 +96,7 @@ document.addEventListener("DOMContentLoaded", () => {
         markAll.disabled = true;
         try {
             await NotificationsAPI.markAllRead();
+            unreadCount = 0;
             await load();
         } catch (requestError) {
             error.textContent = requestError.message;

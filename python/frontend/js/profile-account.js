@@ -12,6 +12,35 @@ document.addEventListener("DOMContentLoaded", () => {
     let savedAvatarUrl = null;
     let addressPage = 1;
 
+    const applyProfile = (profile) => {
+        const profileName = profile.name || "Người dùng mới";
+        profileForm.elements.name.value = profile.name || "";
+        savedAvatarUrl = profile.avatar || null;
+        page.querySelector("[data-profile-name]").textContent = profileName;
+        const accountRole = page.querySelector("[data-profile-role]");
+        if (accountRole) {
+            accountRole.textContent = String(profile.role || "student").toLowerCase() === "admin"
+                ? "Quản trị viên"
+                : "Tài khoản cá nhân";
+        }
+        page.querySelector("[data-profile-school]").textContent = profile.university?.name || "Chưa cập nhật trường học";
+        page.querySelector("[data-profile-email]").textContent = profile.email || "Chưa cập nhật email";
+        page.querySelector("[data-profile-phone]").textContent = profile.phone || "Chưa cập nhật số điện thoại";
+        const accountStatus = page.querySelector("[data-profile-status]");
+        const statusLabels = {
+            active: "Đang hoạt động",
+            pending_verification: "Chờ xác thực",
+            blocked: "Đã khóa",
+        };
+        if (accountStatus) {
+            const status = String(profile.status || "active").toLowerCase();
+            accountStatus.textContent = statusLabels[status] || status;
+            accountStatus.classList.toggle("profile-badge--active", status === "active");
+        }
+        if (!selectedAvatarFile) setAvatarPreview(savedAvatarUrl, profileName);
+        PassbookAuth.updateUser({...PassbookAuth.getCurrentUser(), ...profile});
+    };
+
     const renderAvatar = (container, name, imageUrl) => {
         container.replaceChildren();
         if (imageUrl) {
@@ -50,18 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 profile = await AuthAPI.profile();
             }
-            const profileName = profile.name || "Người dùng mới";
-            profileForm.elements.name.value = profile.name || "";
-            savedAvatarUrl = profile.avatar || null;
-            page.querySelector("[data-profile-name]").textContent = profileName;
-            page.querySelector("[data-profile-school]").textContent = profile.university?.name || "Chưa cập nhật trường học";
-            page.querySelector("[data-profile-email]").textContent = profile.email || "Chưa cập nhật email";
-            const bioElement = page.querySelector("[data-profile-bio]");
-            if (bioElement) {
-                bioElement.textContent = profile.bio || "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.";
-            }
-            if (!selectedAvatarFile) setAvatarPreview(savedAvatarUrl, profileName);
-            PassbookAuth.updateUser({...PassbookAuth.getCurrentUser(), ...profile});
+            applyProfile(profile);
         } catch (error) {
             showToast(error.message);
         }
@@ -190,7 +208,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const payload = {name: profileForm.elements.name.value.trim()};
             if (uploadedAvatar) payload.avatar = uploadedAvatar.image_url;
             const profile = await AuthAPI.updateProfile(payload);
-            PassbookAuth.updateUser({...PassbookAuth.getCurrentUser(), ...profile});
             savedAvatarUrl = profile.avatar || null;
             selectedAvatarFile = null;
             avatarInput.value = "";
@@ -199,7 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectedAvatarPreviewUrl = null;
             }
             avatarMessage.textContent = "";
-            await loadProfile();
+            applyProfile(profile);
             showToast("Đã cập nhật hồ sơ.");
         } catch (error) {
             if (uploadedAvatar?.cloudinary_public_id) {
@@ -235,6 +252,79 @@ document.addEventListener("DOMContentLoaded", () => {
         } finally {
             submit.disabled = false;
         }
+    });
+
+    page.querySelectorAll("[data-contact-form]").forEach((form) => {
+        const channel = form.dataset.contactForm;
+        const valueInput = form.elements[channel];
+        const otpInput = form.elements.otp;
+        const otpFields = form.querySelector("[data-contact-otp]");
+        const message = form.querySelector("[data-contact-message]");
+        const submit = form.querySelector("button[type=submit]");
+        const cancel = form.querySelector("[data-contact-cancel]");
+        form.dataset.stage = "request";
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (!form.reportValidity()) return;
+            submit.disabled = true;
+            message.textContent = "";
+            try {
+                if (form.dataset.stage === "request") {
+                    const target = valueInput.value.trim();
+                    await AuthAPI.requestContactChange(channel, {[channel]: target});
+                    form.dataset.target = target;
+                    form.dataset.stage = "verify";
+                    valueInput.readOnly = true;
+                    otpFields.hidden = false;
+                    otpInput.required = true;
+                    cancel.hidden = false;
+                    submit.textContent = "Xác minh và cập nhật";
+                    otpInput.focus();
+                    message.textContent = "Mã xác minh đã được gửi. Mã có hiệu lực trong thời gian giới hạn.";
+                    return;
+                }
+
+                await AuthAPI.verifyOtp({
+                    target: form.dataset.target,
+                    purpose: channel === "email" ? "CHANGE_EMAIL" : "CHANGE_PHONE",
+                    otp: otpInput.value.trim(),
+                });
+                const profile = await AuthAPI.profile();
+                applyProfile(profile);
+                form.dataset.stage = "request";
+                delete form.dataset.target;
+                valueInput.value = "";
+                valueInput.readOnly = false;
+                otpFields.hidden = true;
+                otpInput.required = false;
+                otpInput.value = "";
+                cancel.hidden = true;
+                submit.textContent = "Gửi mã xác minh";
+                message.textContent = "";
+                showToast(channel === "email"
+                    ? "Đã xác minh và cập nhật email."
+                    : "Đã xác minh và cập nhật số điện thoại.");
+            } catch (error) {
+                showToast(error.message);
+                message.textContent = error.message;
+            } finally {
+                submit.disabled = false;
+            }
+        });
+
+        cancel.addEventListener("click", () => {
+            form.dataset.stage = "request";
+            delete form.dataset.target;
+            valueInput.value = "";
+            valueInput.readOnly = false;
+            otpFields.hidden = true;
+            otpInput.required = false;
+            otpInput.value = "";
+            cancel.hidden = true;
+            submit.textContent = "Gửi mã xác minh";
+            message.textContent = "";
+        });
     });
 
     addressForm.addEventListener("submit", async (event) => {

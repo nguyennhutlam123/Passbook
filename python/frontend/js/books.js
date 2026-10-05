@@ -1,5 +1,5 @@
 const catalogFilters = [
-    ["#catalog-query", "search", "q"],
+    ["#catalog-query", "search"],
     ["#filter-school", "university"],
     ["#filter-faculty", "faculty"],
     ["#filter-major", "major"],
@@ -8,7 +8,7 @@ const catalogFilters = [
     ["#filter-isbn", "isbn"],
     ["#filter-edition", "edition"],
     ["#filter-year", "publication_year"],
-    ["#filter-language", "language_id"],
+    ["#filter-language", "language"],
     ["#filter-category", "category_id"],
     ["#filter-min-price", "min_price"],
     ["#filter-max-price", "max_price"],
@@ -56,7 +56,6 @@ function populateOptions(select, rows, label) {
 async function loadCatalogOptions() {
     const options = await BooksAPI.options();
     populateOptions(document.querySelector("#filter-category"), options.categories, "Tất cả danh mục");
-    populateOptions(document.querySelector("#filter-language"), options.languages, "Tất cả ngôn ngữ");
     const urlParams = new URLSearchParams(location.search);
     const categorySlug = urlParams.get("category_slug");
     if (categorySlug) {
@@ -67,6 +66,14 @@ async function loadCatalogOptions() {
         const field = document.querySelector(selector);
         const value = urlParams.get(urlKey);
         if (field && value) field.value = key === "sort" ? value.replace("_", "-") : value;
+    }
+    const languageField = document.querySelector("#filter-language");
+    const legacyLanguageId = urlParams.get("language_id");
+    if (languageField && !urlParams.has("language") && legacyLanguageId) {
+        const language = (options.languages || []).find(
+            (option) => String(option.id) === legacyLanguageId,
+        );
+        if (language) languageField.value = language.name;
     }
 }
 
@@ -117,6 +124,8 @@ async function loadBooks(page = 1) {
             listing_id: listing.id,
             borrow_terms: listing.borrow_terms,
             deposit_amount: listing.deposit_amount,
+            average_rating: listing.average_rating,
+            review_count: listing.review_count,
         } : listing);
         grid.innerHTML = books.map(renderApiBookCard).join("");
         bindFavoriteButtons(grid);
@@ -193,7 +202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     let debounce;
     for (const selector of [
         "#catalog-query", "#filter-school", "#filter-faculty", "#filter-major", "#filter-subject",
-        "#filter-author", "#filter-isbn", "#filter-edition",
+        "#filter-author", "#filter-isbn", "#filter-edition", "#filter-language",
     ]) {
         document.querySelector(selector)?.addEventListener("input", () => {
             window.clearTimeout(debounce);

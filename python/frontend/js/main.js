@@ -77,7 +77,9 @@ async function addBorrowListingToCart(listingId, button) {
     try {
         const id = Number(listingId);
         await OrdersAPI.addCartItem({listing_type: "BORROW", listing_id: id});
-        window.location.assign(`cart.html?buy_now=${encodeURIComponent(id)}`);
+        window.location.assign(
+            `cart.html?buy_now=${encodeURIComponent(id)}&buy_now_type=BORROW`,
+        );
     } catch (error) {
         showToast(error.message);
     } finally {
@@ -96,7 +98,9 @@ async function addSaleListingToCart(listingId, button, {buyNow = false} = {}) {
     try {
         await OrdersAPI.addCartItem({listing_type: "SALE", listing_id: id});
         if (buyNow) {
-            window.location.assign(`cart.html?buy_now=${encodeURIComponent(id)}`);
+            window.location.assign(
+                `cart.html?buy_now=${encodeURIComponent(id)}&buy_now_type=SALE`,
+            );
             return;
         }
         showToast("Đã thêm sách vào giỏ hàng.");
@@ -151,6 +155,9 @@ async function openConversationModal(conversationId) {
     showModal(`<div class="conversation-modal">
         <button class="modal-close" type="button" data-modal-close>Đóng</button>
         <div data-conversation-heading>Đang tải cuộc hội thoại...</div>
+        <button class="button button-outline" type="button" data-message-older hidden>
+            Tải tin nhắn cũ hơn
+        </button>
         <div class="conversation-messages" data-conversation-messages></div>
         <form data-message-form>
             <label class="form-label" for="message-content">Tin nhắn</label>
@@ -161,15 +168,69 @@ async function openConversationModal(conversationId) {
     const heading = document.querySelector("[data-conversation-heading]");
     const messages = document.querySelector("[data-conversation-messages]");
     const form = document.querySelector("[data-message-form]");
-    const loadMessages = async () => {
-        const data = await MessagingAPI.messages(conversationId);
-        const currentUserId = Number(PassbookAuth.getCurrentUser()?.id);
-        messages.innerHTML = "";
-        (data.results || []).forEach((message) => {
-            messages.appendChild(PassbookMessagingComponents.messageItem(message, currentUserId));
+    const olderButton = document.querySelector("[data-message-older]");
+    let previousPage = null;
+    messages.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-report-message-id]");
+        if (!button) return;
+        const reportForm = button.nextElementSibling;
+        reportForm.hidden = !reportForm.hidden;
+        button.setAttribute("aria-expanded", String(!reportForm.hidden));
+    });
+    messages.addEventListener("submit", async (event) => {
+        const reportForm = event.target.closest(".conversation-message__report-form");
+        if (!reportForm) return;
+        event.preventDefault();
+        if (!reportForm.reportValidity()) return;
+        const submit = reportForm.querySelector("button[type=submit]");
+        const reportButton = reportForm.previousElementSibling;
+        submit.disabled = true;
+        try {
+            await ReportsAPI.create({
+                message_id: reportButton.dataset.reportMessageId,
+                reason: reportForm.elements.reason.value,
+                description: reportForm.elements.description.value.trim(),
+            });
+            reportButton.hidden = true;
+            const confirmation = document.createElement("p");
+            confirmation.textContent = "Đã gửi báo cáo này cho Admin.";
+            reportForm.replaceChildren(confirmation);
+            showToast("Đã gửi báo cáo tin nhắn.");
+        } catch (error) {
+            showToast(error.message);
+            submit.disabled = false;
+        }
+    });
+    const loadMessages = async ({page = "last", prepend = false} = {}) => {
+        const oldScrollHeight = messages.scrollHeight;
+        const data = await MessagingAPI.messages(conversationId, {
+            page,
+            page_size: 50,
         });
-        messages.scrollTop = messages.scrollHeight;
+        const currentUserId = Number(PassbookAuth.getCurrentUser()?.id);
+        const nodes = (data.results || []).map((message) =>
+            PassbookMessagingComponents.messageItem(message, currentUserId));
+        if (prepend) messages.prepend(...nodes);
+        else messages.replaceChildren(...nodes);
+        previousPage = data.previous
+            ? new URL(data.previous, window.location.href).searchParams.get("page")
+            : null;
+        olderButton.hidden = !previousPage;
+        messages.scrollTop = prepend
+            ? messages.scrollHeight - oldScrollHeight
+            : messages.scrollHeight;
     };
+    olderButton.addEventListener("click", async () => {
+        if (!previousPage) return;
+        olderButton.disabled = true;
+        try {
+            await loadMessages({page: previousPage, prepend: true});
+        } catch (error) {
+            showToast(error.message);
+        } finally {
+            olderButton.disabled = false;
+        }
+    });
     try {
         const conversation = await MessagingAPI.getConversation(conversationId);
         const contextTitle = conversation.book?.title
@@ -185,14 +246,22 @@ async function openConversationModal(conversationId) {
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
             const input = form.querySelector("textarea");
+            const submit = form.querySelector("button[type=submit]");
             const content = input.value.trim();
-            if (!content) return;
+            if (!content || submit.disabled) return;
+            submit.disabled = true;
             try {
                 await MessagingAPI.sendMessage(conversationId, {content});
                 input.value = "";
-                await loadMessages();
+                try {
+                    await loadMessages();
+                } catch (error) {
+                    showToast(`Tin nhắn đã gửi, nhưng không thể tải lại lịch sử: ${error.message}`);
+                }
             } catch (error) {
                 showToast(error.message);
+            } finally {
+                submit.disabled = false;
             }
         });
     } catch (error) {
@@ -305,7 +374,7 @@ function renderHomepage() {
         console.error("Không thể tải sách cho mượn trên trang chủ.", error);
     });
 
-    BooksAPI.list({page_size: 4, sort: "newest"}).then((data) => {
+    BooksAPI.list({page: 1, page_size: 4, sort: "newest"}).then((data) => {
         const books = data.results || [];
         if (books.length) {
             newGrid.innerHTML = books.map(renderBookCard).join("");

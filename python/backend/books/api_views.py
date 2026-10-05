@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Count, Exists, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models import Avg, Count, Exists, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -196,6 +196,35 @@ def optimized_books_queryset(
     return queryset.select_related(*selected_relations).prefetch_related(*prefetches)
 
 
+def _attach_listing_response_data(book):
+    borrow_terms = BorrowTerms.objects.only(
+        'id',
+        'lend_listing_id',
+        'max_days',
+        'late_fee_per_day',
+        'deposit_required',
+        'shipping_paid_by',
+        'return_method',
+        'notes',
+    )
+    sale_listing = SaleListing.objects.filter(
+        book_id=book.pk,
+        status__in=('PENDING', 'ACTIVE', 'RESERVED'),
+    ).order_by('-created_at', '-id').first()
+    lend_listing = LendListing.objects.filter(
+        book_id=book.pk,
+        status__in=('PENDING', 'ACTIVE', 'RESERVED', 'ON_LOAN'),
+    ).prefetch_related(
+        Prefetch(
+            'borrow_terms',
+            queryset=borrow_terms,
+            to_attr='listing_terms',
+        ),
+    ).order_by('-created_at', '-id').first()
+    book.active_sale_listings = [sale_listing] if sale_listing else []
+    book.active_lend_listings = [lend_listing] if lend_listing else []
+
+
 def prefetch_book_reviews(books):
     books = list(books)
     if not books:
@@ -205,6 +234,9 @@ def prefetch_book_reviews(books):
     reviews = Review.objects.filter(
         Q(sale_listing__book_id__in=book_ids)
         | Q(lend_listing__book_id__in=book_ids),
+    ).filter(
+        reviewer_id=F('order__buyer_id'),
+        order__status='COMPLETED',
     ).select_related(
         'reviewer',
         'sale_listing',
@@ -235,7 +267,44 @@ def prefetch_book_reviews(books):
             reviews_by_book[book_id].append(review)
 
     for book in books:
-        book._prefetched_book_reviews = reviews_by_book[book.id]
+        book_reviews = reviews_by_book[book.id]
+        book._prefetched_book_reviews = book_reviews
+        book._book_review_count = len(book_reviews)
+        book._book_average_rating = (
+            round(sum(review.rating for review in book_reviews) / len(book_reviews), 1)
+            if book_reviews else None
+        )
+    return books
+
+
+def prefetch_book_rating_summaries(books):
+    books = list(books)
+    if not books:
+        return books
+
+    book_ids = [book.id for book in books]
+    summaries = Review.objects.filter(
+        Q(sale_listing__book_id__in=book_ids)
+        | Q(lend_listing__book_id__in=book_ids),
+    ).filter(
+        reviewer_id=F('order__buyer_id'),
+        order__status='COMPLETED',
+    ).annotate(
+        _book_id=Coalesce('sale_listing__book_id', 'lend_listing__book_id'),
+    ).values(
+        '_book_id',
+    ).annotate(
+        average_rating=Avg('rating'),
+        review_count=Count('id'),
+    )
+    summaries_by_book = {
+        row['_book_id']: (round(row['average_rating'], 1), row['review_count'])
+        for row in summaries
+    }
+    for book in books:
+        average_rating, review_count = summaries_by_book.get(book.id, (None, 0))
+        book._book_average_rating = average_rating
+        book._book_review_count = review_count
     return books
 
 
@@ -343,6 +412,11 @@ class BookListView(APIView):
         language_id = self._filter_integer(query_params, 'language_id')
         if language_id is not None:
             queryset = queryset.filter(book_edition__language_id=language_id)
+        language = (query_params.get('language') or '').strip()
+        if language:
+            queryset = queryset.filter(
+                book_edition__language__name__icontains=language,
+            )
         university_id = self._filter_integer(query_params, 'university_id')
         if university_id is not None:
             queryset = queryset.filter(owner__university_id=university_id)
@@ -447,6 +521,7 @@ class BookListView(APIView):
 
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
+        prefetch_book_rating_summaries(page)
         return paginator.get_paginated_response(
             BookListSerializer(page, many=True).data,
         )
@@ -495,17 +570,7 @@ class BookListView(APIView):
         serializer.is_valid(raise_exception=True)
         book = serializer.save()
         book = optimized_books_queryset().get(pk=book.pk)
-        book.active_sale_listings = list(
-            SaleListing.objects.filter(book_id=book.pk, status='PENDING')
-            .order_by('-id')[:1],
-        )
-        if not book.active_sale_listings:
-            book.active_lend_listings = list(
-                LendListing.objects.filter(
-                    book_id=book.pk,
-                    status__in=('ACTIVE', 'RESERVED', 'ON_LOAN'),
-                ).order_by('-id')[:1],
-            )
+        _attach_listing_response_data(book)
         prefetch_book_reviews([book])
         return Response(BookSerializer(book).data, status=status.HTTP_201_CREATED)
 
@@ -606,6 +671,7 @@ class BookDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         book = serializer.save()
         book = optimized_books_queryset().get(pk=book.pk)
+        _attach_listing_response_data(book)
         prefetch_book_reviews([book])
         return Response(BookSerializer(book).data)
 
@@ -911,6 +977,7 @@ class FavoriteListView(APIView):
         )
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
+        prefetch_book_rating_summaries([favorite.book for favorite in page])
         return paginator.get_paginated_response(
             FavoriteSerializer(page, many=True).data,
         )

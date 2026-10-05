@@ -28,7 +28,7 @@
         })();
     </script>
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/workspace.css?v=profile-v4">
+    <link rel="stylesheet" href="css/workspace.css?v=profile-v5">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
@@ -37,16 +37,16 @@
             <div class="profile-avatar avatar" data-profile-avatar aria-hidden="true">NL</div>
             <div id="profile-overview" class="profile-overview">
                 <div class="profile-badges">
-                    <span class="profile-badge">Tài khoản cá nhân</span>
-                    <span class="profile-badge profile-badge--active">Đang hoạt động</span>
+                    <span class="profile-badge" data-profile-role>Tài khoản cá nhân</span>
+                    <span class="profile-badge" data-profile-status>Đang hoạt động</span>
                 </div>
                 <p class="caption">Thành viên PassBook</p>
                 <h1 class="profile-title"><span data-profile-name>Người dùng mới</span><span class="verified" hidden><span aria-hidden="true">✓</span></span></h1>
                 <div class="profile-meta" aria-label="Thông tin cá nhân">
                     <p class="profile-meta__item"><span class="profile-meta__label">Trường</span><span data-profile-school>Chưa cập nhật trường học</span></p>
                     <p class="profile-meta__item"><span class="profile-meta__label">Email</span><span data-profile-email>Chưa cập nhật email</span></p>
+                    <p class="profile-meta__item"><span class="profile-meta__label">Điện thoại</span><span data-profile-phone>Chưa cập nhật số điện thoại</span></p>
                 </div>
-                <p class="profile-bio" data-profile-bio>Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.</p>
             </div>
         </section>
         <section class="profile-section">
@@ -81,6 +81,34 @@
                     <input class="form-control" id="new-password" name="new_password" type="password" minlength="8" autocomplete="new-password" required>
                     <button class="button button-outline" type="submit">Đổi mật khẩu</button>
                 </form>
+                <section class="workspace-checkout profile-card" aria-labelledby="profile-contact-title">
+                    <div>
+                        <h3 id="profile-contact-title">Thông tin liên hệ</h3>
+                        <p class="caption">Email và số điện thoại chỉ được cập nhật sau khi xác minh OTP.</p>
+                    </div>
+                    <form data-contact-form="email">
+                        <label class="form-label" for="profile-email">Email mới</label>
+                        <input class="form-control" id="profile-email" name="email" type="email" maxlength="254" autocomplete="off" placeholder="name@example.com" required>
+                        <div data-contact-otp hidden>
+                            <label class="form-label" for="profile-email-otp">Mã xác minh email</label>
+                            <input class="form-control" id="profile-email-otp" name="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
+                        </div>
+                        <p class="caption" data-contact-message aria-live="polite"></p>
+                        <button class="button button-outline" type="submit">Gửi mã xác minh</button>
+                        <button class="button button-outline" type="button" data-contact-cancel hidden>Đổi email khác</button>
+                    </form>
+                    <form data-contact-form="phone">
+                        <label class="form-label" for="profile-phone">Số điện thoại mới</label>
+                        <input class="form-control" id="profile-phone" name="phone" type="tel" maxlength="30" autocomplete="off" pattern="\+?(?:[0-9]| |\(|\)|-){7,30}" placeholder="+84 912 345 678" required>
+                        <div data-contact-otp hidden>
+                            <label class="form-label" for="profile-phone-otp">Mã xác minh điện thoại</label>
+                            <input class="form-control" id="profile-phone-otp" name="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
+                        </div>
+                        <p class="caption" data-contact-message aria-live="polite"></p>
+                        <button class="button button-outline" type="submit">Gửi mã xác minh</button>
+                        <button class="button button-outline" type="button" data-contact-cancel hidden>Đổi số khác</button>
+                    </form>
+                </section>
             </div>
         </section>
         <section class="profile-section">
@@ -109,7 +137,7 @@
             <div class="profile-address-list" data-address-list></div>
             </div>
         </section>
-        <section class="profile-section">
+        <section class="profile-section" id="reports">
             <div class="section-heading profile-section__heading"><div><span class="eyebrow">An toàn</span><h2>Báo cáo của tôi</h2></div></div>
             <div class="report-list profile-card" data-report-list><p class="caption">Đang tải...</p></div>
         </section>
@@ -139,7 +167,7 @@
     <script src="js/api/notifications-api.js"></script>
     <script src="js/api/reports-api.js"></script>
     <script src="js/main.js"></script>
-    <script src="js/profile.js?v=profile-v2"></script>
-    <script src="js/profile-account.js?v=profile-v2"></script>
+    <script src="js/profile.js?v=report-status-20261006"></script>
+    <script src="js/profile-account.js?v=profile-v5"></script>
 </body>
 </html>

@@ -1,7 +1,9 @@
+import hashlib
 from decimal import Decimal
 from urllib.parse import urlparse
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.utils.text import slugify
 from rest_framework import serializers
 
 from users.models import Subject
@@ -157,6 +159,8 @@ class BookSerializer(serializers.Serializer):
     pickup_location = serializers.SerializerMethodField()
     images = BookImageSerializer(many=True, read_only=True)
     reviews = serializers.SerializerMethodField()
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
@@ -251,6 +255,14 @@ class BookSerializer(serializers.Serializer):
             many=True,
         ).data
 
+    @staticmethod
+    def get_average_rating(book):
+        return getattr(book, '_book_average_rating', None)
+
+    @staticmethod
+    def get_review_count(book):
+        return getattr(book, '_book_review_count', 0)
+
 
 class BookListSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
@@ -270,6 +282,8 @@ class BookListSerializer(serializers.Serializer):
     seller = BookSellerSerializer(read_only=True)
     buying_intent_count = serializers.IntegerField(read_only=True, default=0)
     selling_intent_count = serializers.IntegerField(read_only=True, default=0)
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
 
     @staticmethod
     def get_condition_label(book):
@@ -286,11 +300,25 @@ class BookListSerializer(serializers.Serializer):
             return None
         return {'id': image.id, 'image_url': image.image_url}
 
+    @staticmethod
+    def get_average_rating(book):
+        return getattr(book, '_book_average_rating', None)
+
+    @staticmethod
+    def get_review_count(book):
+        return getattr(book, '_book_review_count', 0)
+
 
 class BookWriteSerializer(serializers.Serializer):
     subject_id = serializers.PrimaryKeyRelatedField(
         source='subject', queryset=Subject.objects.filter(status='ACTIVE'),
         required=False, allow_null=True,
+    )
+    subject_name = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=False,
+        trim_whitespace=True,
     )
     category_id = serializers.PrimaryKeyRelatedField(
         source='category',
@@ -334,9 +362,14 @@ class BookWriteSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
-    deposit_required = serializers.BooleanField(required=False, default=False)
-    shipping_paid_by = serializers.CharField(max_length=20, required=False)
-    return_method = serializers.CharField(max_length=30, required=False)
+    shipping_paid_by = serializers.ChoiceField(
+        choices=('BORROWER', 'LENDER'),
+        required=False,
+    )
+    return_method = serializers.ChoiceField(
+        choices=('IN_PERSON', 'POSTAL', 'DELIVERY'),
+        required=False,
+    )
     terms_notes = serializers.CharField(required=False, allow_blank=True)
     images = BookImageManifestSerializer(
         many=True,
@@ -355,6 +388,10 @@ class BookWriteSerializer(serializers.Serializer):
     pickup_note = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     def validate(self, attrs):
+        if 'subject_name' in attrs and 'subject' in attrs:
+            raise serializers.ValidationError({
+                'subject_name': 'Chỉ gửi tên môn học hoặc mã môn học, không gửi cả hai.',
+            })
         if self.initial_data.get('pickup_location_id') not in (None, ''):
             raise serializers.ValidationError({
                 'pickup_location_id': 'Điểm nhận riêng không thuộc schema Lite; trường này đã ngừng hỗ trợ.',
@@ -429,12 +466,45 @@ class BookWriteSerializer(serializers.Serializer):
                 })
         return attrs
 
+    @staticmethod
+    def _subject_from_name(name, now):
+        subject = Subject.objects.filter(name__iexact=name).order_by('id').first()
+        if subject is not None:
+                if subject.status != 'ACTIVE':
+                    raise serializers.ValidationError({
+                        'subject_name': 'Môn học này hiện không hoạt động.',
+                    })
+                return subject
+
+        slug = slugify(name).replace('-', '_').upper()[:30] or 'CUSTOM'
+        digest = hashlib.sha256(name.casefold().encode('utf-8')).hexdigest()[:10].upper()
+        code = f'USR_{slug}_{digest}'
+        try:
+                with transaction.atomic():
+                    return Subject.objects.create(
+                        name=name,
+                        code=code,
+                        status='ACTIVE',
+                        created_at=now,
+                        updated_at=now,
+                    )
+        except IntegrityError:
+                subject = Subject.objects.filter(name__iexact=name).order_by('id').first()
+                if subject is None:
+                    raise
+                if subject.status != 'ACTIVE':
+                    raise serializers.ValidationError({
+                        'subject_name': 'Môn học này hiện không hoạt động.',
+                    })
+                return subject
+
     def create(self, validated_data):
         from django.db import transaction
         from django.utils import timezone
 
         now = timezone.now()
         subject = validated_data.pop('subject', None)
+        subject_name = validated_data.pop('subject_name', None)
         category = validated_data.pop('category', None)
         isbn = validated_data.pop('isbn', None)
         listing_type = validated_data.pop('listing_type', 'BUY')
@@ -442,7 +512,8 @@ class BookWriteSerializer(serializers.Serializer):
         deposit_amount = validated_data.pop('deposit_amount', None)
         max_days = validated_data.pop('max_days', None)
         late_fee_per_day = validated_data.pop('late_fee_per_day', None)
-        deposit_required = validated_data.pop('deposit_required', False)
+        validated_data.pop('deposit_required', None)
+        deposit_required = False
         shipping_paid_by = validated_data.pop('shipping_paid_by', None)
         return_method = validated_data.pop('return_method', None)
         terms_notes = validated_data.pop('terms_notes', None)
@@ -451,6 +522,8 @@ class BookWriteSerializer(serializers.Serializer):
         description = validated_data.get('description')
         condition = validated_data['condition_status']
         with transaction.atomic():
+            if subject_name is not None:
+                subject = self._subject_from_name(subject_name, now)
             public_ids = [
                 image['cloudinary_public_id']
                 for image in images or []
@@ -584,8 +657,12 @@ class BookWriteSerializer(serializers.Serializer):
                 'listing_type': 'Không thể đổi hình thức của tin đăng hiện có.',
             })
         listing = sale_listing or lend_listing
+        requires_review = listing.status == 'ACTIVE'
         now = timezone.now()
         with transaction.atomic():
+            subject_name = validated_data.pop('subject_name', None)
+            if subject_name is not None:
+                validated_data['subject'] = self._subject_from_name(subject_name, now)
             image_manifest = validated_data.pop('images', None)
             has_isbn = 'isbn' in validated_data
             isbn = validated_data.pop('isbn', None)
@@ -717,6 +794,9 @@ class BookWriteSerializer(serializers.Serializer):
             work.updated_at = now
             book.updated_at = now
             book.book_edition.updated_at = now
+            if requires_review:
+                listing.status = 'PENDING'
+                listing.published_at = None
             listing.save()
             if lend_listing is not None:
                 terms = getattr(lend_listing, 'listing_terms', None)
@@ -731,12 +811,12 @@ class BookWriteSerializer(serializers.Serializer):
                 for field in (
                     'max_days',
                     'late_fee_per_day',
-                    'deposit_required',
                     'shipping_paid_by',
                     'return_method',
                 ):
                     if field in validated_data:
                         setattr(terms, field, validated_data[field])
+                terms.deposit_required = False
                 if 'terms_notes' in validated_data:
                     terms.notes = validated_data['terms_notes']
                 terms.updated_at = now

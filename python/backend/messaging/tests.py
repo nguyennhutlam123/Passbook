@@ -26,6 +26,12 @@ class MessagePaginationTests(SimpleTestCase):
         page = paginator.paginate_queryset(list(range(100)), request, view=None)
         self.assertEqual(len(page), 50)
 
+    def test_last_page_can_be_requested_for_recent_messages(self):
+        request = Request(APIRequestFactory().get('/messages/?page=last&page_size=10'))
+        paginator = BookPagination()
+        page = paginator.paginate_queryset(list(range(25)), request, view=None)
+        self.assertEqual(page, list(range(20, 25)))
+
     def test_oversized_page_size_is_rejected(self):
         request = Request(APIRequestFactory().get('/messages/?page_size=500'))
         with self.assertRaises(ValidationError):
@@ -149,3 +155,58 @@ class ConversationSerializationTests(SimpleTestCase):
         self.assertIsNone(payload['book'])
         self.assertEqual(payload['buyer']['name'], 'Buyer')
         self.assertEqual(payload['seller']['name'], 'Seller')
+
+    def test_private_conversation_serializes_the_other_participant_and_preview(self):
+        now = timezone.now()
+        other_user = SimpleNamespace(id=1, full_name='Seller')
+        current_user = SimpleNamespace(id=2, full_name='Buyer')
+        conversation = Conversation(
+            id=4,
+            conversation_type='SALE',
+            created_at=now,
+            updated_at=now,
+        )
+        conversation._prefetched_objects_cache = {
+            'members': [
+                SimpleNamespace(user_id=1, user=other_user),
+                SimpleNamespace(user_id=2, user=current_user),
+            ],
+        }
+        conversation.latest_messages = [
+            SimpleNamespace(
+                sender_id=1,
+                content='Is this book still available?',
+                sent_at=now,
+            ),
+        ]
+
+        payload = ConversationSerializer(
+            conversation,
+            context={'request': SimpleNamespace(user=current_user)},
+        ).data
+
+        self.assertEqual(payload['other_user'], {'id': 1, 'name': 'Seller'})
+        self.assertEqual(
+            payload['last_message'],
+            {
+                'sender_id': 1,
+                'content': 'Is this book still available?',
+                'created_at': now.isoformat().replace('+00:00', 'Z'),
+            },
+        )
+
+
+class MessageReadReceiptTests(SimpleTestCase):
+    def test_read_receipt_uses_recipient_last_read_time(self):
+        sent_at = timezone.now()
+        message = SimpleNamespace(
+            id=8,
+            sender=SimpleNamespace(id=2),
+            content='Hello',
+            sent_at=sent_at,
+            reader_last_read_at=sent_at,
+        )
+
+        self.assertTrue(MessageSerializer(message).data['is_read'])
+        message.reader_last_read_at = sent_at - timezone.timedelta(seconds=1)
+        self.assertFalse(MessageSerializer(message).data['is_read'])

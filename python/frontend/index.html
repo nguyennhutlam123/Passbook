@@ -4,31 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PassBook — Tìm đúng giáo trình</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=book-rating-20261006">
 </head>
 <body class="home-page">
     <header class="site-header" data-site-header></header>
     <main>
-        <section class="storefront-hero">
-            <div class="page-shell storefront-hero__inner">
-                <div class="storefront-hero__copy">
-                    <span class="eyebrow">PassBook · Student book marketplace</span>
-                    <h1>Tìm đúng giáo trình.<br><em>Học đúng môn.</em></h1>
-                    <p>Khám phá giáo trình và sách học tập từ cộng đồng sinh viên.</p>
-                    <form class="storefront-search" data-home-search>
-                        <label class="sr-only" for="home-search">Tìm sách</label>
-                        <span aria-hidden="true">⌕</span>
-                        <input id="home-search" name="q" type="search" placeholder="Tìm tên sách, môn học, tác giả..." autocomplete="off">
-                        <button class="button button-primary" type="submit">Tìm sách <span aria-hidden="true">→</span></button>
-                    </form>
-                    <div class="storefront-hero__meta"><span><strong>Giá tốt</strong> từ sinh viên</span><span><strong>Dễ gặp</strong> tại campus</span><span><strong>Đúng sách</strong> đúng môn</span></div>
-                </div>
-                <div class="storefront-hero__art" aria-label="Bộ sưu tập sách học tập">
-                    <div class="book-stack book-stack--one"><span>TOÁN<br><small>ĐẠI SỐ</small></span></div>
-                    <div class="book-stack book-stack--two"><span>PHYSICS<br><small>101</small></span></div>
-                    <div class="book-stack book-stack--main"><span>pass<br><b>book</b><small>student edition</small></span></div>
-                    <span class="hero-sticker">MỞ<br>TRANG<br>MỚI</span>
-                </div>
+        <section class="home-banner" aria-labelledby="home-banner-title">
+            <img class="home-banner__image" src="images/home-banner.svg" alt="" aria-hidden="true">
+            <div class="home-banner__content">
+                <span class="eyebrow">PassBook · Student book marketplace</span>
+                <h1 id="home-banner-title">Tìm đúng giáo trình.<br><em>Học đúng môn.</em></h1>
+                <p>Khám phá giáo trình và sách học tập từ cộng đồng sinh viên.</p>
+                <form class="storefront-search" data-home-search>
+                    <label class="sr-only" for="home-search">Tìm sách</label>
+                    <span aria-hidden="true">⌕</span>
+                    <input id="home-search" name="q" type="search" placeholder="Tìm tên sách, môn học, tác giả..." autocomplete="off">
+                    <button class="button button-primary" type="submit">Tìm sách <span aria-hidden="true">→</span></button>
+                </form>
+                <div class="storefront-hero__meta"><span><strong>Giá tốt</strong> từ sinh viên</span><span><strong>Dễ gặp</strong> tại campus</span><span><strong>Đúng sách</strong> đúng môn</span></div>
             </div>
         </section>
 
@@ -84,7 +77,7 @@
     <script src="js/core/router.js"></script>
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js?v=borrow-workflow-20261005"></script>
-    <script src="js/components/books/book-card.js?v=sale-cart-20261005"></script>
+    <script src="js/components/books/book-card.js?v=book-rating-20261006"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
@@ -92,6 +85,6 @@
     <script src="js/api/favorites-api.js"></script>
     <script src="js/api/orders-api.js?v=borrow-workflow-20261005"></script>
     <script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js?v=sale-cart-20261005"></script>
+    <script src="js/main.js?v=buy-now-type-20261005"></script>
 </body>
 </html>

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, Mock, patch
 from django.contrib import admin
 from django.apps import apps
 from django.conf import settings
+from django.db.models import F
 from django.utils import timezone
 from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
@@ -27,6 +28,7 @@ from .models import (
     LendListing,
     Order,
     Payment,
+    SaleListing,
     Shipment,
     ShipmentTracking,
 )
@@ -50,6 +52,7 @@ from .shipment_services import update_shipment_status
 from .sale_api_views import SaleListingDetailView, SaleListingInputSerializer
 from .commerce_api_views import (
     BookReservationListCreateView,
+    BorrowOrderActionView,
     BorrowOrderReturnRequestView,
     BorrowReturnInputSerializer,
     CartItemInputSerializer,
@@ -59,17 +62,32 @@ from .commerce_api_views import (
     PaymentInputSerializer,
     PaymentListCreateView,
     RefundCreateView,
+    ReviewCreateView,
+    ReviewInputSerializer,
     ReturnActionView,
     ShipmentTrackingCreateView,
     CheckoutAddressInputSerializer,
     CheckoutInputSerializer,
+    LendListingInputSerializer,
     checkout_payment_method,
     lend_listing_payload,
 )
 from .admin import LendListingAdmin
 from .public_profile_api_views import PublicUserListingsView
-from .api_views import BookDetailView, BookImageListView, prefetch_book_reviews
-from .request_api_views import BookIntentSummaryView, BookRequestDetailView
+from .api_views import (
+    BookDetailView,
+    BookImageListView,
+    _attach_listing_response_data,
+    prefetch_book_reviews,
+    prefetch_book_rating_summaries,
+)
+from .request_api_views import (
+    BookIntentSummaryView,
+    BookRequestDetailView,
+    BookRequestInterestView,
+    BookRequestInputSerializer,
+    request_payload,
+)
 from users.models import OtpVerification
 
 
@@ -124,7 +142,9 @@ class BookReviewPrefetchTests(SimpleTestCase):
             lend_listing=None,
         )
         query = Mock()
-        query.select_related.return_value.only.return_value.order_by.return_value = [
+        filtered_query = Mock()
+        query.filter.return_value = filtered_query
+        filtered_query.select_related.return_value.only.return_value.order_by.return_value = [
             review,
         ]
         books = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
@@ -133,11 +153,132 @@ class BookReviewPrefetchTests(SimpleTestCase):
             prefetch_book_reviews(books)
 
         filter_reviews.assert_called_once()
+        query.filter.assert_called_once_with(
+            reviewer_id=F('order__buyer_id'),
+            order__status='COMPLETED',
+        )
         self.assertEqual(
             BookSerializer.get_reviews(books[0])[0]['reviewer'],
             {'id': 8, 'name': 'Reviewer'},
         )
+        self.assertEqual(BookSerializer.get_average_rating(books[0]), 5)
+        self.assertEqual(BookSerializer.get_review_count(books[0]), 1)
+        self.assertEqual(books[0]._book_average_rating, 5)
+        self.assertEqual(books[0]._book_review_count, 1)
         self.assertEqual(BookSerializer.get_reviews(books[1]), [])
+        self.assertIsNone(books[1]._book_average_rating)
+
+    def test_rating_summaries_are_batched_and_default_for_unrated_books(self):
+        query = Mock()
+        filtered_query = Mock()
+        query.filter.return_value = filtered_query
+        filtered_query.annotate.return_value.values.return_value.annotate.return_value = [
+            {'_book_id': 1, 'average_rating': 4.25, 'review_count': 4},
+        ]
+        books = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+
+        with patch(
+            'books.api_views.Review.objects.filter',
+            return_value=query,
+        ) as filter_reviews:
+            prefetch_book_rating_summaries(books)
+
+        filter_reviews.assert_called_once()
+        query.filter.assert_called_once_with(
+            reviewer_id=F('order__buyer_id'),
+            order__status='COMPLETED',
+        )
+        self.assertEqual(books[0]._book_average_rating, 4.2)
+        self.assertEqual(books[0]._book_review_count, 4)
+        self.assertIsNone(books[1]._book_average_rating)
+        self.assertEqual(books[1]._book_review_count, 0)
+
+
+class ReviewCreateAuthorizationTests(SimpleTestCase):
+    def test_review_input_enforces_rating_bounds_and_comment_limit(self):
+        invalid_rating = ReviewInputSerializer(data={'rating': 0})
+        oversized_comment = ReviewInputSerializer(data={
+            'rating': 5,
+            'comment': 'a' * 5001,
+        })
+
+        self.assertFalse(invalid_rating.is_valid())
+        self.assertFalse(oversized_comment.is_valid())
+
+    def test_only_completed_order_buyer_can_rate_the_book(self):
+        order = SimpleNamespace(
+            id=31,
+            status='COMPLETED',
+            buyer_id=10,
+            seller_id=20,
+        )
+        request = APIRequestFactory().post(
+            '/api/orders/31/reviews/',
+            {'rating': 5, 'comment': 'Rất tốt'},
+            format='json',
+        )
+        force_authenticate(
+            request,
+            user=SimpleNamespace(id=20, is_authenticated=True),
+        )
+
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=order,
+        ), patch('books.commerce_api_views.Review.objects.get_or_create') as create_review:
+            response = ReviewCreateView.as_view()(request, order_id=31)
+
+        self.assertEqual(response.status_code, 403)
+        create_review.assert_not_called()
+
+    def test_buyer_rating_is_saved_for_the_order_listing(self):
+        listing = SimpleNamespace(id=12)
+        order = SimpleNamespace(
+            id=31,
+            status='COMPLETED',
+            buyer_id=10,
+            seller_id=20,
+            order_type='SALE',
+            sale_items=Mock(),
+        )
+        order.sale_items.select_related.return_value.order_by.return_value.first.return_value = SimpleNamespace(
+            sale_listing=listing,
+        )
+        review = SimpleNamespace(
+            id=44,
+            order_id=31,
+            rating=5,
+            comment='Rất tốt',
+            created_at=timezone.now(),
+            reviewer_id=10,
+            reviewer=SimpleNamespace(full_name='Buyer'),
+        )
+        request = APIRequestFactory().post(
+            '/api/orders/31/reviews/',
+            {'rating': 5, 'comment': 'Rất tốt'},
+            format='json',
+        )
+        force_authenticate(
+            request,
+            user=SimpleNamespace(id=10, is_authenticated=True),
+        )
+
+        with patch(
+            'books.commerce_api_views.get_object_or_404',
+            return_value=order,
+        ), patch(
+            'books.commerce_api_views.Review.objects.get_or_create',
+            return_value=(review, True),
+        ) as create_review:
+            response = ReviewCreateView.as_view()(request, order_id=31)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['rating'], 5)
+        self.assertEqual(response.data['reviewer']['name'], 'Buyer')
+        self.assertEqual(
+            create_review.call_args.kwargs['defaults']['sale_listing'],
+            listing,
+        )
 
 
 class PublicUserListingsApiTests(SimpleTestCase):
@@ -496,6 +637,59 @@ class FavoritePayloadTests(SimpleTestCase):
 
 
 class LegacyBookInputCompatibilityTests(SimpleTestCase):
+    def test_book_input_accepts_a_custom_subject_name(self):
+        serializer = BookWriteSerializer(data={
+            'title': 'Custom subject book',
+            'price': '100000',
+            'condition_status': 'good',
+            'subject_name': '  Biochemistry  ',
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['subject_name'], 'Biochemistry')
+
+    @patch('books.serializers.transaction.atomic', return_value=nullcontext())
+    @patch('books.serializers.Subject.objects.create')
+    @patch('books.serializers.Subject.objects.filter')
+    def test_custom_subject_name_creates_active_catalog_subject(
+        self,
+        filter_subjects,
+        create_subject,
+        atomic,
+    ):
+        filter_subjects.return_value.order_by.return_value.first.return_value = None
+        subject = Mock(status='ACTIVE')
+        create_subject.return_value = subject
+        now = timezone.now()
+
+        result = BookWriteSerializer._subject_from_name('Biochemistry', now)
+
+        self.assertIs(result, subject)
+        create_subject.assert_called_once()
+        created = create_subject.call_args.kwargs
+        self.assertEqual(created['name'], 'Biochemistry')
+        self.assertEqual(created['status'], 'ACTIVE')
+        self.assertEqual(created['created_at'], now)
+        self.assertEqual(created['updated_at'], now)
+        self.assertTrue(created['code'].startswith('USR_BIOCHEMISTRY_'))
+
+    @patch('books.serializers.transaction.atomic', return_value=nullcontext())
+    @patch('books.serializers.Subject.objects.create')
+    @patch('books.serializers.Subject.objects.filter')
+    def test_existing_subject_name_reuses_active_catalog_subject(
+        self,
+        filter_subjects,
+        create_subject,
+        atomic,
+    ):
+        subject = Mock(status='ACTIVE')
+        filter_subjects.return_value.order_by.return_value.first.return_value = subject
+
+        result = BookWriteSerializer._subject_from_name('Biochemistry', timezone.now())
+
+        self.assertIs(result, subject)
+        create_subject.assert_not_called()
+
     def test_pickup_location_is_rejected_explicitly(self):
         serializer = BookWriteSerializer(data={
             'title': 'Test book',
@@ -550,6 +744,206 @@ class LegacyBookInputCompatibilityTests(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         for field in ('max_days', 'shipping_paid_by', 'return_method'):
             self.assertIn(field, serializer.errors)
+
+    def test_borrow_listing_choices_are_validated(self):
+        base = {
+            'listing_type': 'BORROW',
+            'title': 'Borrow listing',
+            'rental_fee': '0',
+            'condition_status': 'good',
+            'max_days': 14,
+            'shipping_paid_by': 'BORROWER',
+            'return_method': 'IN_PERSON',
+        }
+        self.assertTrue(BookWriteSerializer(data=base).is_valid())
+        for field, invalid_value in (
+            ('shipping_paid_by', 'SOMEONE_ELSE'),
+            ('return_method', 'UNSUPPORTED'),
+        ):
+            with self.subTest(field=field):
+                payload = {**base, field: invalid_value}
+                serializer = BookWriteSerializer(data=payload)
+                self.assertFalse(serializer.is_valid())
+                self.assertIn(field, serializer.errors)
+
+    def test_lend_listing_endpoint_validates_borrow_term_choices(self):
+        base = {
+            'book_id': 1,
+            'rental_fee': '0',
+            'max_days': 14,
+            'shipping_paid_by': 'BORROWER',
+            'return_method': 'IN_PERSON',
+        }
+        self.assertTrue(LendListingInputSerializer(data=base).is_valid())
+        for field, invalid_value in (
+            ('shipping_paid_by', 'SOMEONE_ELSE'),
+            ('return_method', 'UNSUPPORTED'),
+        ):
+            with self.subTest(field=field):
+                serializer = LendListingInputSerializer(data={
+                    **base,
+                    field: invalid_value,
+                })
+                self.assertFalse(serializer.is_valid())
+                self.assertIn(field, serializer.errors)
+
+    def test_deposit_is_never_mandatory_for_new_borrow_listings(self):
+        serializer = BookWriteSerializer(data={
+            'listing_type': 'BORROW',
+            'title': 'Borrow listing',
+            'rental_fee': '0',
+            'condition_status': 'good',
+            'max_days': 14,
+            'shipping_paid_by': 'BORROWER',
+            'return_method': 'IN_PERSON',
+            'deposit_amount': '250000',
+            'deposit_required': True,
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertNotIn('deposit_required', serializer.validated_data)
+
+    def test_active_listing_edit_is_queued_for_review_again(self):
+        listing = SimpleNamespace(
+            status='ACTIVE',
+            title='Old title',
+            description=None,
+            published_at=timezone.now(),
+            updated_at=None,
+            save=Mock(),
+        )
+        work = SimpleNamespace(
+            title='Old title',
+            description=None,
+            author_name=None,
+            category=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        edition = SimpleNamespace(
+            book_work=work,
+            edition_name=None,
+            publication_year=None,
+            publisher_name=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        book = SimpleNamespace(
+            pk=10,
+            book_edition=edition,
+            condition_label='GOOD',
+            condition_description=None,
+            updated_at=None,
+            save=Mock(),
+            sale_listings=Mock(),
+            lend_listings=Mock(),
+        )
+        book.sale_listings.filter.return_value.first.return_value = listing
+        book.lend_listings.filter.return_value.first.return_value = None
+
+        with patch('books.serializers.transaction.atomic', return_value=nullcontext()):
+            BookWriteSerializer().update(book, {'title': 'Updated title'})
+
+        self.assertEqual(listing.status, 'PENDING')
+        self.assertIsNone(listing.published_at)
+        self.assertEqual(listing.title, 'Updated title')
+        listing.save.assert_called_once()
+
+    def test_editing_active_borrow_listing_removes_required_deposit(self):
+        listing = SimpleNamespace(
+            status='ACTIVE',
+            title='Old title',
+            description=None,
+            published_at=timezone.now(),
+            updated_at=None,
+            save=Mock(),
+        )
+        terms = SimpleNamespace(
+            max_days=14,
+            late_fee_per_day=None,
+            deposit_required=True,
+            shipping_paid_by='BORROWER',
+            return_method='IN_PERSON',
+            notes='',
+            updated_at=None,
+            save=Mock(),
+        )
+        listing.listing_terms = terms
+        work = SimpleNamespace(
+            title='Old title',
+            description=None,
+            author_name=None,
+            category=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        edition = SimpleNamespace(
+            book_work=work,
+            edition_name=None,
+            publication_year=None,
+            publisher_name=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        book = SimpleNamespace(
+            pk=11,
+            book_edition=edition,
+            condition_label='GOOD',
+            condition_description=None,
+            updated_at=None,
+            save=Mock(),
+            sale_listings=Mock(),
+            lend_listings=Mock(),
+        )
+        book.sale_listings.filter.return_value.first.return_value = None
+        book.lend_listings.filter.return_value.first.return_value = listing
+
+        with patch('books.serializers.transaction.atomic', return_value=nullcontext()):
+            BookWriteSerializer().update(book, {'title': 'Updated title'})
+
+        self.assertEqual(listing.status, 'PENDING')
+        self.assertIsNone(listing.published_at)
+        self.assertFalse(terms.deposit_required)
+        terms.save.assert_called_once()
+
+    @patch('books.api_views.LendListing.objects.filter')
+    @patch('books.api_views.SaleListing.objects.filter')
+    def test_new_pending_borrow_listing_is_returned_as_borrow(
+        self,
+        sale_filter,
+        lend_filter,
+    ):
+        terms = SimpleNamespace(
+            max_days=14,
+            late_fee_per_day=Decimal('0'),
+            deposit_required=False,
+            shipping_paid_by='BORROWER',
+            return_method='IN_PERSON',
+            notes='',
+        )
+        listing = SimpleNamespace(
+            id=43,
+            status='PENDING',
+            rental_fee=Decimal('0'),
+            deposit_amount=None,
+            listing_terms=terms,
+        )
+        sale_filter.return_value.order_by.return_value.first.return_value = None
+        lend_filter.return_value.prefetch_related.return_value.order_by.return_value.first.return_value = listing
+        book = SimpleNamespace(
+            pk=21,
+            _active_sale_listing=Mock(return_value=None),
+            _active_lend_listing=Mock(return_value=listing),
+        )
+
+        _attach_listing_response_data(book)
+
+        self.assertEqual(BookSerializer.get_listing_type(book), 'BORROW')
+        self.assertEqual(BookSerializer.get_listing_id(book), 43)
+        self.assertEqual(
+            BookSerializer.get_borrow_terms(book)['shipping_paid_by'],
+            'BORROWER',
+        )
 
     def test_book_detail_metadata_can_be_entered_on_a_listing(self):
         serializer = BookWriteSerializer(data={
@@ -953,6 +1347,8 @@ class BookListPayloadTests(SimpleTestCase):
                 'seller',
                 'buying_intent_count',
                 'selling_intent_count',
+                'average_rating',
+                'review_count',
             },
         )
         self.assertEqual(
@@ -1164,6 +1560,46 @@ class PolymorphicValidationTests(SimpleTestCase):
 
 
 class SaleListingPermissionTests(SimpleTestCase):
+    def test_editing_published_sale_listing_requires_review_again(self):
+        factory = APIRequestFactory()
+        request = factory.patch('/api/sale-listings/44/', {'price': '120000'})
+        request.user = SimpleNamespace(id=7, is_authenticated=True)
+        request.data = {'price': '120000'}
+        listing = SimpleNamespace(
+            id=44,
+            pk=44,
+            seller_id=7,
+            status='ACTIVE',
+            published_at=timezone.now(),
+            updated_at=None,
+            price=Decimal('100000'),
+            book=SimpleNamespace(status='AVAILABLE'),
+            save=Mock(),
+        )
+        listing_queryset = Mock()
+        listing_queryset.return_value.get.return_value = listing
+
+        with patch(
+            'books.sale_api_views.get_object_or_404',
+            return_value=listing,
+        ), patch(
+            'books.sale_api_views.listing_queryset',
+            listing_queryset,
+        ), patch(
+            'books.sale_api_views.sale_listing_payload',
+            return_value={'id': 44, 'status': 'PENDING'},
+        ):
+            response = SaleListingDetailView.patch.__wrapped__(
+                SaleListingDetailView(),
+                request,
+                listing_id=44,
+            )
+
+        self.assertEqual(response.data['status'], 'PENDING')
+        self.assertEqual(listing.status, 'PENDING')
+        self.assertIsNone(listing.published_at)
+        listing.save.assert_called_once()
+
     def test_user_cannot_patch_or_delete_another_users_listing(self):
         factory = APIRequestFactory()
         outsider = SimpleNamespace(id=99, is_authenticated=True)
@@ -1620,8 +2056,6 @@ class BookRequestOwnershipTests(SimpleTestCase):
                 item.save.assert_not_called()
 
     def test_client_cannot_set_request_status(self):
-        from .request_api_views import BookRequestInputSerializer
-
         serializer = BookRequestInputSerializer(data={
             'request_type': 'BUY',
             'title_keyword': 'Biology',
@@ -1631,6 +2065,173 @@ class BookRequestOwnershipTests(SimpleTestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertNotIn('status', serializer.validated_data)
         self.assertNotIn('user', serializer.validated_data)
+
+    def test_request_can_save_a_future_planned_date_separately_from_expiry(self):
+        planned_at = timezone.now() + timedelta(days=5)
+        expires_at = planned_at + timedelta(days=2)
+        serializer = BookRequestInputSerializer(data={
+            'request_type': 'BUY',
+            'title_keyword': 'Calculus I',
+            'planned_at': planned_at.isoformat(),
+            'expires_at': expires_at.isoformat(),
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['planned_at'], planned_at)
+        self.assertEqual(serializer.validated_data['expires_at'], expires_at)
+
+    def test_request_dates_reject_past_plans_and_expiry_before_plan(self):
+        now = timezone.now()
+        for planned_at, expires_at, expected_field in (
+            (now - timedelta(days=1), now + timedelta(days=1), 'planned_at'),
+            (now + timedelta(days=2), now + timedelta(days=1), 'expires_at'),
+        ):
+            with self.subTest(expected_field=expected_field):
+                serializer = BookRequestInputSerializer(data={
+                    'request_type': 'SELL_INTENT',
+                    'title_keyword': 'Calculus I',
+                    'planned_at': planned_at.isoformat(),
+                    'expires_at': expires_at.isoformat(),
+                })
+                self.assertFalse(serializer.is_valid())
+                self.assertIn(expected_field, serializer.errors)
+
+    def test_patch_unrelated_fields_is_allowed_when_existing_plan_is_past(self):
+        request = SimpleNamespace(
+            request_type='BUY',
+            book_work=None,
+            category=None,
+            title_keyword='Calculus I',
+            budget_max=None,
+            asking_price=None,
+            planned_at=timezone.now() - timedelta(days=1),
+            expires_at=None,
+        )
+        serializer = BookRequestInputSerializer(
+            request,
+            data={'description': 'Updated details'},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_editing_request_title_preserves_or_clears_book_work_correctly(self):
+        request = SimpleNamespace(
+            request_type='BUY',
+            book_work=SimpleNamespace(id=12),
+            category=None,
+            title_keyword='Calculus I',
+            budget_max=None,
+            asking_price=None,
+            planned_at=None,
+            expires_at=None,
+        )
+        unchanged = BookRequestInputSerializer(
+            request,
+            data={'title_keyword': 'Calculus I'},
+            partial=True,
+        )
+        changed = BookRequestInputSerializer(
+            request,
+            data={'title_keyword': 'Linear Algebra'},
+            partial=True,
+        )
+
+        self.assertTrue(unchanged.is_valid(), unchanged.errors)
+        self.assertNotIn('book_work', unchanged.validated_data)
+        self.assertTrue(changed.is_valid(), changed.errors)
+        self.assertIsNone(changed.validated_data['book_work'])
+
+    def test_request_payload_includes_planned_date_and_same_intent_count(self):
+        planned_at = timezone.now() + timedelta(days=4)
+        item = SimpleNamespace(
+            id=1,
+            user_id=10,
+            request_type='BUY',
+            book_work_id=None,
+            category_id=None,
+            title_keyword='Calculus I',
+            description='',
+            budget_max=None,
+            asking_price=None,
+            currency=None,
+            condition_preference=None,
+            status='OPEN',
+            planned_at=planned_at,
+            expires_at=None,
+            same_intent_count=3,
+            created_at=timezone.now(),
+            updated_at=timezone.now(),
+        )
+
+        payload = request_payload(item)
+
+        self.assertEqual(payload['planned_at'], planned_at)
+        self.assertEqual(payload['same_intent_count'], 3)
+
+
+class BookRequestInterestResponseTests(SimpleTestCase):
+    def test_new_interest_sends_a_private_intro_and_notifies_request_owner(self):
+        factory = APIRequestFactory()
+        responder = SimpleNamespace(id=22, full_name='Responder')
+        request = factory.post(
+            '/api/book-requests/41/interests/',
+            {'note': 'I have the 2025 edition.'},
+            format='json',
+        )
+        force_authenticate(request, user=responder)
+        view = BookRequestInterestView()
+        api_request = view.initialize_request(request)
+        owner = SimpleNamespace(id=11, full_name='Request owner')
+        book_request = SimpleNamespace(
+            id=41,
+            user_id=owner.id,
+            user=owner,
+            status='OPEN',
+            expires_at=None,
+            request_type='BUY',
+            book_work_id=None,
+            title_keyword='Calculus I',
+        )
+        interest = SimpleNamespace(id=51, status='ACTIVE', note='I have the 2025 edition.')
+        conversation = Mock(id=61, updated_at=None)
+
+        with patch(
+            'books.request_api_views.BookRequest.objects.select_for_update',
+            return_value=Mock(),
+        ), patch(
+            'books.request_api_views.get_object_or_404',
+            return_value=book_request,
+        ), patch(
+            'books.request_api_views.RequestInterest.objects.get_or_create',
+            return_value=(interest, True),
+        ), patch(
+            'books.request_api_views.get_or_create_private_conversation',
+            return_value=(conversation, True),
+        ), patch(
+            'books.request_api_views.Message.objects.create',
+        ) as create_message, patch(
+            'books.request_api_views.create_notification',
+        ) as create_notification:
+            response = BookRequestInterestView.post.__wrapped__(
+                view,
+                api_request,
+                request_id=book_request.id,
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['conversation_id'], conversation.id)
+        create_message.assert_called_once()
+        self.assertEqual(
+            create_message.call_args.kwargs['content'],
+            'Mình có thông tin sách phù hợp với yêu cầu “Calculus I”.\n'
+            'I have the 2025 edition.',
+        )
+        create_notification.assert_called_once()
+        self.assertEqual(
+            create_notification.call_args.kwargs['entity_id'],
+            conversation.id,
+        )
 
 
 class PaymentInputSecurityTests(SimpleTestCase):
@@ -1985,6 +2586,25 @@ class PaymentInputSecurityTests(SimpleTestCase):
 
 
 class BorrowOrderAuthorizationTests(SimpleTestCase):
+    def test_borrower_and_lender_cannot_manage_admin_shipping_transitions(self):
+        for action in ('confirm', 'reject', 'ready', 'start', 'complete'):
+            with self.subTest(action=action):
+                request = APIRequestFactory().post(
+                    f'/api/borrow-orders/18/{action}/',
+                    {},
+                    format='json',
+                )
+                force_authenticate(
+                    request,
+                    user=SimpleNamespace(id=10, is_authenticated=True),
+                )
+                response = BorrowOrderActionView.as_view()(
+                    request,
+                    borrow_order_id=18,
+                    action=action,
+                )
+                self.assertEqual(response.status_code, 400)
+
     def test_rejecting_paid_borrow_order_creates_refund_request(self):
         lender = SimpleNamespace(id=10)
         book = SimpleNamespace(status='RESERVED', save=Mock())
@@ -2211,17 +2831,22 @@ class BorrowReturnFlowTests(SimpleTestCase):
             'books.commerce_api_views.BorrowOrder.objects',
             self._locked_borrow_manager(borrow),
         ), patch('books.commerce_api_views.get_object_or_404', return_value=borrow), patch(
+            'books.commerce_api_views.mark_overdue_borrow_orders',
+        ), patch(
             'books.commerce_api_views.Shipment.objects',
         ) as shipment_manager, patch(
             'books.commerce_api_views.ShipmentTracking.objects',
         ) as tracking_manager:
-            shipment_manager.filter.return_value.exists.return_value = False
-            shipment_manager.create.return_value = shipment
-            response = BorrowOrderReturnRequestView.post.__wrapped__(
-                BorrowOrderReturnRequestView(),
-                request,
-                borrow_order_id=borrow.id,
-            )
+            with patch(
+                'books.commerce_api_views.notify_borrow_order_parties',
+            ) as notify_borrow:
+                shipment_manager.filter.return_value.exists.return_value = False
+                shipment_manager.create.return_value = shipment
+                response = BorrowOrderReturnRequestView.post.__wrapped__(
+                    BorrowOrderReturnRequestView(),
+                    request,
+                    borrow_order_id=borrow.id,
+                )
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['shipment']['direction'], 'BORROWER_TO_OWNER')
@@ -2240,6 +2865,15 @@ class BorrowReturnFlowTests(SimpleTestCase):
         self.assertEqual(
             tracking_manager.create.call_args.kwargs['status'],
             'PENDING',
+        )
+        notify_borrow.assert_called_once_with(
+            borrow,
+            title='Yêu cầu trả sách đang được vận chuyển',
+            content=(
+                f'Người mượn đã tạo yêu cầu trả cho phiếu #{borrow.id}. '
+                'Admin sẽ cập nhật trạng thái vận chuyển và xác nhận khi nhận lại sách.'
+            ),
+            recipient_ids=(borrow.lender_id,),
         )
 
     def test_owner_and_outsider_cannot_create_return(self):
@@ -2263,6 +2897,8 @@ class BorrowReturnFlowTests(SimpleTestCase):
                 with patch(
                     'books.commerce_api_views.get_object_or_404',
                     return_value=borrow,
+                ), patch(
+                    'books.commerce_api_views.mark_overdue_borrow_orders',
                 ), patch(
                     'books.commerce_api_views.Shipment.objects.create',
                 ) as create_shipment:
@@ -2293,6 +2929,8 @@ class BorrowReturnFlowTests(SimpleTestCase):
         with patch(
             'books.commerce_api_views.get_object_or_404',
             return_value=borrow,
+        ), patch(
+            'books.commerce_api_views.mark_overdue_borrow_orders',
         ), patch(
             'books.commerce_api_views.Shipment.objects.create',
         ) as create_shipment:

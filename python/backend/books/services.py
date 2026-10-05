@@ -1,5 +1,6 @@
 import hashlib
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.conf import settings
@@ -9,8 +10,11 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from notifications.models import Notification
-from notifications.services import notify_order_status_changed
+from notifications.services import (
+    create_notification,
+    notify_borrow_order_parties,
+    notify_order_status_changed,
+)
 
 from .models import (
     Book,
@@ -207,16 +211,60 @@ def calculate_payment_split(amount, fee_rate):
 
 
 def _notify(user_id, notification_type, title, content, entity_type, entity_id, now):
-    Notification.objects.create(
-        user_id=user_id,
+    create_notification(
+        user_id,
         notification_type=notification_type,
         title=title,
         content=content,
         entity_type=entity_type,
         entity_id=entity_id,
-        is_read=False,
         created_at=now,
     )
+
+
+def calculate_borrow_late_fee(borrow_order, *, at=None):
+    at = at or timezone.now()
+    due_at = borrow_order.expected_return_at
+    if due_at is None or at <= due_at:
+        late_days = 0
+    else:
+        late_days = int((at - due_at).total_seconds() // timedelta(days=1).total_seconds())
+    terms = borrow_order.borrow_terms_snapshot or {}
+    daily_fee = Decimal(str(terms.get('late_fee_per_day') or '0'))
+    return {
+        'late_days': late_days,
+        'late_fee_per_day': daily_fee,
+        'late_fee_amount': daily_fee * late_days,
+    }
+
+
+@transaction.atomic
+def mark_overdue_borrow_orders(*, now=None):
+    now = now or timezone.now()
+    overdue_orders = list(
+        BorrowOrder.objects.select_for_update().select_related(
+            'lender',
+            'borrower',
+        ).filter(
+            status='ACTIVE',
+            expected_return_at__lt=now,
+        ).order_by('id'),
+    )
+    for borrow_order in overdue_orders:
+        borrow_order.status = 'OVERDUE'
+        borrow_order.updated_at = now
+        borrow_order.save(update_fields=['status', 'updated_at'])
+        content = (
+            f'Phiếu mượn #{borrow_order.id} đã quá hạn. '
+            'Phí trễ được tính theo số ngày 24 giờ hoàn tất và Admin sẽ xác nhận khi nhận sách trả.'
+        )
+        notify_borrow_order_parties(
+            borrow_order,
+            title='Phiếu mượn đã quá hạn',
+            content=content,
+            created_at=now,
+        )
+    return len(overdue_orders)
 
 
 def _release_borrow_inventory(

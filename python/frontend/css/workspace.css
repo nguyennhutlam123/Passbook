@@ -101,6 +101,53 @@
     color: #fff;
 }
 
+.admin-nav-group {
+    position: relative;
+}
+
+.admin-nav-group > summary {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    cursor: pointer;
+    list-style: none;
+    padding: .45rem .8rem;
+}
+
+.admin-nav-group > summary::-webkit-details-marker {
+    display: none;
+}
+
+.admin-nav-group > summary::after {
+    content: "⌄";
+    margin-left: .45rem;
+}
+
+.admin-nav-group[open] > summary {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.admin-nav-group__items {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: 0 12px 30px rgb(20 35 28 / 12%);
+    display: grid;
+    gap: .35rem;
+    left: 0;
+    min-width: 13rem;
+    padding: .5rem;
+    position: absolute;
+    top: calc(100% + .4rem);
+    z-index: 20;
+}
+
+.admin-nav-group__items a {
+    border-radius: .6rem;
+    white-space: nowrap;
+}
+
 .admin-dashboard-content {
     min-height: 18rem;
 }
@@ -286,9 +333,25 @@
     font-size: .9rem;
 }
 
+.request-card__intent-count {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
 .request-card__facts > span + span::before {
     content: "·";
     margin-right: .6rem;
+}
+
+.request-response-form {
+    display: grid;
+    gap: .5rem;
+    flex-basis: 100%;
+    max-width: 34rem;
+}
+
+.request-response-form[hidden] {
+    display: none;
 }
 
 .request-matches {
@@ -750,13 +813,26 @@
 
 @media (max-width: 640px) {
     .admin-dashboard-nav {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        padding-bottom: .4rem;
+        flex-wrap: wrap;
+        overflow: visible;
     }
 
-    .admin-dashboard-nav a {
-        flex: 0 0 auto;
+    .admin-nav-group[open] {
+        flex-basis: 100%;
+    }
+
+    .admin-nav-group__items {
+        border: 0;
+        box-shadow: none;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        left: auto;
+        min-width: 0;
+        padding: .4rem 0 0;
+        position: static;
+    }
+
+    .admin-nav-group__items a {
+        white-space: normal;
     }
 
     .admin-filter-form {

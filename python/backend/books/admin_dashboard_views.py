@@ -2,6 +2,7 @@ from django.db import transaction
 from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -30,6 +31,7 @@ from .shipment_services import (
     is_return_shipment,
     update_shipment_status,
 )
+from .services import calculate_borrow_late_fee, mark_overdue_borrow_orders
 
 
 def _apply_admin_filters(queryset, request, *, borrow=False):
@@ -198,6 +200,7 @@ class AdminBorrowOrderListView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
 
     def get_queryset(self, request):
+        mark_overdue_borrow_orders()
         queryset = BorrowOrder.objects.select_related(
             'order',
             'lend_listing',
@@ -708,9 +711,17 @@ class AdminShipmentListView(APIView):
                 if return_shipment
                 else 'OWNER_TO_BORROWER'
             )
+            late_fee = calculate_borrow_late_fee(
+                borrow,
+                at=borrow.actual_return_at or timezone.now(),
+            )
             borrow_reference = {
                 'id': borrow.id,
                 'status': borrow.status,
+                'late_days': late_fee['late_days'],
+                'late_fee_per_day': str(late_fee['late_fee_per_day']),
+                'late_fee_estimate': str(late_fee['late_fee_amount']),
+                'late_fee_amount': str(borrow.late_fee_amount),
             }
         else:
             shipment_type = 'SALE'

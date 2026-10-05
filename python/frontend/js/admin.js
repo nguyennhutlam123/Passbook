@@ -5,6 +5,7 @@
         overview: ["Tổng quan", "overview"],
         users: ["Tài khoản", "users"],
         marketplace: ["Marketplace", "marketplace"],
+        moderation: ["Kiểm duyệt tin", "moderation"],
         reservations: ["Đặt sách", "reservations"],
         borrow: ["Mượn sách", "borrow"],
         commerce: ["Đơn hàng / Commerce", "commerce"],
@@ -454,28 +455,61 @@
 
         function renderReportCard(report, reload) {
             const card = element("article", undefined, "report-item");
-            card.append(element("strong", `#${report.id} · ${report.reason || "Báo cáo"}`));
+            const reasonLabels = {
+                INAPPROPRIATE_CONTENT: "Nội dung không phù hợp",
+                INCORRECT_BOOK_INFO: "Thông tin sách sai",
+                SPAM: "Spam",
+                SCAM: "Lừa đảo",
+                POLICY_VIOLATION: "Vi phạm chính sách",
+                OTHER: "Lý do khác",
+            };
+            const statusLabels = {
+                OPEN: "Mới",
+                IN_REVIEW: "Đang xem xét",
+                RESOLVED: "Đã xử lý",
+                REJECTED: "Từ chối",
+            };
+            card.append(element(
+                "strong",
+                `#${report.id} · ${reasonLabels[report.reason] || report.reason || "Báo cáo"}`,
+            ));
             card.append(element("p", [
-                `Reporter #${report.reporter_id || "—"}`,
-                `Target user #${report.reported_user_id || "—"}`,
-                `Book #${report.book_id || "—"}`,
-                `Sale listing #${report.sale_listing_id || "—"}`,
-                `Lend listing #${report.lend_listing_id || "—"}`,
-                `Handler #${report.handled_by_id || "—"}`,
-                report.status,
+                `Người báo cáo: ${report.reporter_name || `#${report.reporter_id || "—"}`}`,
+                report.reported_user_id
+                    ? `Tài khoản: ${report.reported_user_name || `#${report.reported_user_id}`}`
+                    : "",
+                report.book_id
+                    ? `Sách: ${report.book_title || `#${report.book_id}`}`
+                    : "",
+                report.sale_listing_id
+                    ? `Tin bán: ${report.sale_listing_title || `#${report.sale_listing_id}`}`
+                    : "",
+                report.lend_listing_id
+                    ? `Tin cho mượn: ${report.lend_listing_title || `#${report.lend_listing_id}`}`
+                    : "",
+                report.message_id ? `Tin nhắn #${report.message_id}` : "",
+                report.message_sender_id
+                    ? `Người gửi tin nhắn #${report.message_sender_id}`
+                    : "",
+                `Người xử lý #${report.handled_by_id || "—"}`,
+                statusLabels[report.status] || report.status,
                 formatValue(report.created_at),
-            ].join(" · ")));
+            ].filter(Boolean).join(" · ")));
             card.append(element("p", report.description || "Không có mô tả."));
+            if (report.message_content) {
+                const message = element("blockquote", report.message_content, "caption");
+                card.append(message);
+            }
             const select = element("select", undefined, "form-control");
             ["OPEN", "IN_REVIEW", "RESOLVED", "REJECTED"].forEach((value) => {
-                const option = element("option", value);
+                const option = element("option", statusLabels[value]);
                 option.value = value;
                 option.selected = report.status === value;
                 select.append(option);
             });
             const note = element("textarea", undefined, "form-control");
             note.value = report.resolution_note || "";
-            note.placeholder = "Ghi chú xử lý khi đóng báo cáo";
+            note.placeholder = "Ghi chú nội bộ; bắt buộc khi đóng báo cáo";
             const save = element("button", "Lưu xử lý", "button button-primary");
             save.type = "button";
             save.addEventListener("click", async () => {
@@ -502,6 +536,17 @@
                 queryBySection.reports = values;
                 pageBySection.reports = 1;
                 renderSection("reports");
+            });
+            const reportStatusLabels = {
+                OPEN: "Mới",
+                IN_REVIEW: "Đang xem xét",
+                RESOLVED: "Đã xử lý",
+                REJECTED: "Từ chối",
+            };
+            [...filter.status.options].forEach((option) => {
+                if (reportStatusLabels[option.value]) {
+                    option.textContent = reportStatusLabels[option.value];
+                }
             });
             filter.status.value = selectedStatus;
             const content = element("div");
@@ -646,6 +691,18 @@
                         receiver: shipment.receiver ? `${shipment.receiver.name} (${shipment.receiver.email})` : "—",
                         order: shipment.order ? `#${shipment.order.id} · ${shipment.order.code} · ${shipment.order.type} · ${shipment.order.status}` : "—",
                         borrow: shipment.borrow ? `#${shipment.borrow.id} · ${shipment.borrow.status}` : "—",
+                        late_days: shipment.type === "BORROW_RETURN"
+                            ? shipment.borrow?.late_days ?? 0
+                            : undefined,
+                        late_fee_per_day: shipment.type === "BORROW_RETURN"
+                            ? formatMoney(shipment.borrow?.late_fee_per_day)
+                            : undefined,
+                        late_fee_estimate: shipment.type === "BORROW_RETURN"
+                            ? formatMoney(shipment.borrow?.late_fee_estimate)
+                            : undefined,
+                        late_fee_confirmed: shipment.type === "BORROW_RETURN"
+                            ? formatMoney(shipment.borrow?.late_fee_amount)
+                            : undefined,
                         status: shipment.status,
                         created_at: shipment.created_at,
                         updated_at: shipment.updated_at,
@@ -678,7 +735,15 @@
                         form.append(label, noteLabel, locationLabel, update);
                         form.addEventListener("submit", async (event) => {
                             event.preventDefault();
-                            const message = `Xác nhận chuyển Shipment #${shipment.id} từ ${shipment.status} sang ${nextStatus.value}?`;
+                            const isBorrowDelivery = shipment.type === "BORROW"
+                                && nextStatus.value === "DELIVERED";
+                            const isBorrowReturn = shipment.type === "BORROW_RETURN"
+                                && nextStatus.value === "DELIVERED";
+                            const message = isBorrowDelivery
+                                ? `Xác nhận đã giao sách và thu COD cho phiếu mượn #${shipment.borrow?.id}? Chỉ sau xác nhận này, phiếu mới chuyển sang đang mượn.`
+                                : isBorrowReturn
+                                    ? `Xác nhận đã nhận lại sách của phiếu #${shipment.borrow?.id}? Hệ thống sẽ chốt phí trễ ${formatMoney(shipment.borrow?.late_fee_estimate)}, hoàn tất phiếu và mở lại sách.`
+                                    : `Xác nhận chuyển Shipment #${shipment.id} từ ${shipment.status} sang ${nextStatus.value}?`;
                             if (!global.confirm(message)) return;
                             update.disabled = true;
                             try {
@@ -1220,22 +1285,20 @@
                     addGroups(content, data);
                     addArrays(content, data);
                     if (section === "marketplace") {
-                        content.append(element("p", "API hiện cung cấp thống kê và phân bố listing; chưa có Admin listing-list endpoint nên không hiển thị danh sách giả.", "caption"));
+                        content.append(element("p", "Tổng quan số lượng và trạng thái tin đăng trong chợ sách.", "caption"));
                     } else if (section === "commerce") {
-                        content.append(element("p", "GMV chỉ tính SALE; Borrow được thống kê riêng.", "caption"));
+                        content.append(element("p", "GMV chỉ tính đơn mua bán; giao dịch mượn được thống kê riêng.", "caption"));
                     } else if (section === "shipping") {
-                        content.append(element("p", `Shipment trả Borrow có hướng: ${data.return_direction || "—"}.`, "caption"));
+                        content.append(element("p", "Theo dõi và cập nhật vận chuyển giao sách, nhận lại sách mượn và đơn mua bán.", "caption"));
                     } else if (section === "returns") {
                         content.append(element("h3", "Borrow Return · BORROWER → OWNER"));
-                        content.append(element("p", "Trả sách là workflow vận chuyển/xác nhận, không tạo payment hoặc refund.", "caption"));
+                        content.append(element("p", "Trả sách mượn được xử lý qua vận chuyển và xác nhận đã nhận lại sách.", "caption"));
                         content.append(element("h3", "Sale Return / Refund"));
-                        content.append(element("p", "Hoàn hàng/hoàn tiền SALE được theo dõi riêng với Borrow Return.", "caption"));
+                        content.append(element("p", "Đơn hoàn hàng và hoàn tiền mua bán được theo dõi riêng với trả sách mượn.", "caption"));
                     } else if (section === "demand") {
-                        content.append(element("p", "Chỉ gồm Want to Buy và Want to Borrow; Hold / Waiting List không thuộc scope.", "caption"));
+                        content.append(element("p", "Thống kê các yêu cầu mua và mượn sách do cộng đồng đăng.", "caption"));
                     } else if (section === "borrow") {
-                        content.append(element("p", "Reservation và Borrow list có bộ lọc/lịch sử chi tiết riêng. Admin chỉ theo dõi, không có quyền approve/reject.", "caption"));
-                    } else if (section === "messaging" || section === "notifications" || section === "reviews" || section === "favorites" || section === "catalog") {
-                        content.append(element("p", "Hiển thị thống kê và các nhóm/list mà Dashboard API hiện hỗ trợ.", "caption"));
+                        content.append(element("p", "Admin theo dõi phiếu mượn và vận chuyển; người mượn hoặc chủ sách xử lý các quyết định của giao dịch.", "caption"));
                     }
                 } catch (requestError) {
                     showError(content, requestError);
@@ -1245,13 +1308,190 @@
             await load();
         }
 
+        async function renderModeration(shell) {
+            let listingType = "sale";
+            const filters = element("form", undefined, "admin-filter-form");
+            const typeTabs = element("div", undefined, "admin-dashboard-nav");
+            const results = element("div");
+            const statusLabel = element("label", "Trạng thái");
+            const status = element("select", undefined, "form-control");
+            status.setAttribute("aria-label", "Lọc tin theo trạng thái");
+            [
+                ["PENDING", "Chờ duyệt"],
+                ["ACTIVE", "Đã duyệt"],
+                ["REJECTED", "Đã từ chối"],
+                ["", "Tất cả"],
+            ].forEach(([value, label]) => {
+                const option = element("option", label);
+                option.value = value;
+                status.append(option);
+            });
+            statusLabel.append(status);
+            const searchLabel = element("label", "Tìm tin / người đăng");
+            const search = element("input", undefined, "form-control");
+            search.type = "search";
+            search.setAttribute("aria-label", "Tìm theo tên sách hoặc người đăng");
+            searchLabel.append(search);
+            const submit = element("button", "Lọc", "button button-primary");
+            submit.type = "submit";
+            filters.append(statusLabel, searchLabel, submit);
+
+            const message = element("p", undefined, "caption");
+            const updateTabs = () => {
+                typeTabs.replaceChildren();
+                [
+                    ["sale", "Tin bán"],
+                    ["borrow", "Tin cho mượn"],
+                ].forEach(([value, label]) => {
+                    const tab = element(
+                        "button",
+                        label,
+                        listingType === value
+                            ? "button button-primary"
+                            : "button button-outline",
+                    );
+                    tab.type = "button";
+                    if (listingType === value) tab.setAttribute("aria-current", "page");
+                    tab.addEventListener("click", () => {
+                        listingType = value;
+                        pageBySection[`moderation-${listingType}`] = 1;
+                        updateTabs();
+                        load();
+                    });
+                    typeTabs.append(tab);
+                });
+            };
+
+            const load = async () => {
+                const sectionKey = `moderation-${listingType}`;
+                const page = pageBySection[sectionKey] || 1;
+                results.replaceChildren(element("p", "Đang tải tin đăng...", "loading-state"));
+                message.textContent = "";
+                try {
+                    const data = await global.AdminAPI.listingsForModeration(
+                        listingType,
+                        {
+                            status: status.value || undefined,
+                            search: search.value.trim() || undefined,
+                            page,
+                        },
+                    );
+                    results.replaceChildren();
+                    if (!data.results?.length) {
+                        results.append(element("p", "Không có tin đăng phù hợp.", "empty-state"));
+                    }
+                    data.results?.forEach((listing) => {
+                        const card = element("article", undefined, "admin-detail-card");
+                        const heading = element("div", undefined, "section-heading");
+                        heading.append(
+                            element("h3", listing.title),
+                            element("span", listing.status),
+                        );
+                        card.append(heading);
+                        if (listing.book?.images?.[0]) {
+                            const image = element("img");
+                            image.src = listing.book.images[0];
+                            image.alt = `Ảnh bìa: ${listing.title}`;
+                            image.loading = "lazy";
+                            image.width = 120;
+                            card.append(image);
+                        }
+                        card.append(element(
+                            "p",
+                            `Người đăng: ${listing.owner?.name || "—"} (${listing.owner?.email || "—"})`,
+                        ));
+                        card.append(element(
+                            "p",
+                            `${listingType === "sale" ? "Giá bán" : "Phí mượn"}: ${formatMoney(listing.price)}`,
+                        ));
+                        card.append(element(
+                            "p",
+                            `Sách: ${listing.book?.title || "—"} · Tác giả: ${listing.book?.author || "—"} · Tình trạng: ${listing.book?.condition_status || "—"}`,
+                        ));
+                        if (listing.book?.category || listing.book?.edition || listing.book?.publication_year) {
+                            card.append(element(
+                                "p",
+                                `Danh mục: ${listing.book.category || "—"} · Ấn bản: ${listing.book.edition || "—"} · Năm: ${listing.book.publication_year || "—"}`,
+                            ));
+                        }
+                        if (listing.description) {
+                            card.append(element("p", listing.description));
+                        }
+                        card.append(element(
+                            "small",
+                            `Đăng lúc: ${new Date(listing.created_at).toLocaleString("vi-VN")}`,
+                        ));
+                        if (listing.status === "PENDING") {
+                            const actions = element("div", undefined, "section-heading");
+                            const approve = element("button", "Duyệt tin", "button button-primary");
+                            approve.type = "button";
+                            approve.addEventListener("click", async () => {
+                                approve.disabled = true;
+                                try {
+                                    await global.AdminAPI.moderateListing(
+                                        listingType,
+                                        listing.id,
+                                        {action: "APPROVE"},
+                                    );
+                                    message.textContent = `Đã duyệt tin “${listing.title}”.`;
+                                    await load();
+                                } catch (requestError) {
+                                    approve.disabled = false;
+                                    message.textContent = requestError.message || "Không thể duyệt tin.";
+                                }
+                            });
+                            const reject = element("button", "Từ chối", "button button-outline");
+                            reject.type = "button";
+                            reject.addEventListener("click", async () => {
+                                if (!global.confirm(`Từ chối tin “${listing.title}”?`)) return;
+                                reject.disabled = true;
+                                try {
+                                    await global.AdminAPI.moderateListing(
+                                        listingType,
+                                        listing.id,
+                                        {action: "REJECT"},
+                                    );
+                                    message.textContent = `Đã từ chối tin “${listing.title}”.`;
+                                    await load();
+                                } catch (requestError) {
+                                    reject.disabled = false;
+                                    message.textContent = requestError.message || "Không thể từ chối tin.";
+                                }
+                            });
+                            actions.append(approve, reject);
+                            card.append(actions);
+                        }
+                        results.append(card);
+                    });
+                    addPagination(results, data, sectionKey, load);
+                } catch (requestError) {
+                    showError(results, requestError);
+                }
+            };
+
+            shell.wrapper.append(typeTabs, filters, message, results);
+            updateTabs();
+            filters.addEventListener("submit", (event) => {
+                event.preventDefault();
+                pageBySection[`moderation-${listingType}`] = 1;
+                load();
+            });
+            shell.refresh.addEventListener("click", load);
+            await load();
+        }
+
         async function renderSection(section) {
             if (!sections[section]) section = "overview";
             activeSection = section;
             if (simulator) simulator.hidden = section !== "payments";
+            const activeLink = [...nav.querySelectorAll("[data-section]")]
+                .find((link) => link.dataset.section === section);
             nav.querySelectorAll("[data-section]").forEach((link) => {
-                if (link.dataset.section === section) link.setAttribute("aria-current", "page");
+                if (link === activeLink) link.setAttribute("aria-current", "page");
                 else link.removeAttribute("aria-current");
+            });
+            nav.querySelectorAll(".admin-nav-group").forEach((group) => {
+                group.open = Boolean(activeLink && group.contains(activeLink));
             });
             error.textContent = "";
             view.replaceChildren();
@@ -1261,8 +1501,8 @@
             if (section === "reservations" || section === "borrow") {
                 const detail = element("div", undefined, "admin-detail-container");
                 detail.append(element("p", section === "reservations"
-                    ? "ADMIN ACTION: NOT APPLICABLE — owner/user là actor được phép xử lý."
-                    : "ADMIN ACTION: NOT APPLICABLE — owner/lender là actor được phép xử lý.", "caption"));
+                    ? "Admin theo dõi trạng thái; người đặt và chủ sách xử lý yêu cầu."
+                    : "Admin theo dõi phiếu mượn; giao nhận và trả sách được quản lý trong mục Vận chuyển.", "caption"));
                 const config = section === "reservations" ? {
                     statuses: reservationStatuses,
                     list: (query) => global.AdminAPI.reservations(query),
@@ -1295,6 +1535,8 @@
                     ],
                 };
                 await renderRecordSection(section, config, shell, detail);
+            } else if (section === "moderation") {
+                await renderModeration(shell);
             } else if (section === "users") {
                 await renderUsers(shell);
             } else if (section === "reports") {

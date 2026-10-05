@@ -311,6 +311,16 @@ class ChangeContactRequestView(APIView):
 
         user = request.user
         field_name = 'email' if channel == 'email' else 'phone'
+        current_value = getattr(user, field_name) or ''
+        target_value = target.strip()
+        current_value = current_value.strip()
+        if channel == 'email':
+            target_value = target_value.casefold()
+            current_value = current_value.casefold()
+        if target_value == current_value:
+            raise serializers.ValidationError({
+                field_name: 'Thông tin liên hệ này đang được sử dụng trong tài khoản.',
+            })
         if User.objects.filter(**{f'{field_name}__iexact' if channel == 'email' else field_name: target}).exclude(
             pk=user.pk,
         ).exists():

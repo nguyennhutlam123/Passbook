@@ -108,6 +108,10 @@ from books.admin_dashboard_views import (
     AdminShipmentListView,
     AdminShipmentStatusView,
 )
+from books.admin_listing_views import (
+    AdminListingModerationActionView,
+    AdminListingModerationListView,
+)
 from books.sale_api_views import (
     SaleListingDetailView,
     SaleListingListCreateView,
@@ -424,6 +428,16 @@ urlpatterns = [
         'admin/dashboard/shipping/shipments/<int:shipment_id>/status/',
         AdminShipmentStatusView.as_view(),
         name='admin-dashboard-shipment-status',
+    ),
+    path(
+        'admin/dashboard/listings/<str:listing_type>/',
+        AdminListingModerationListView.as_view(),
+        name='admin-dashboard-listings',
+    ),
+    path(
+        'admin/dashboard/listings/<str:listing_type>/<int:listing_id>/moderation/',
+        AdminListingModerationActionView.as_view(),
+        name='admin-dashboard-listing-moderation',
     ),
     path(
         'admin/dashboard/<str:section>/',

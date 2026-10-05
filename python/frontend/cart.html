@@ -19,13 +19,13 @@
             <p class="workspace-total" data-cart-total></p>
             <form class="workspace-checkout" data-checkout-form hidden>
                 <h2 data-checkout-heading>Thông tin đặt hàng</h2>
-                <p class="caption" data-borrow-checkout-note hidden>Giỏ hàng dùng chung cho sách mua và sách mượn. Hãy điền người nhận, số điện thoại và địa chỉ giao; Admin sẽ tiếp nhận yêu cầu, giao sách và cập nhật trạng thái tại Phiếu mượn. Phí mượn/đặt cọc được thu COD khi giao.</p>
+                <p class="caption" data-borrow-checkout-note hidden>Giỏ hàng dùng chung cho sách mua và sách mượn. Phiếu mượn thanh toán COD khi nhận sách; Admin xác nhận đã thu tiền và giao thành công thì phiếu mới chuyển sang đang mượn. Khi trả, tạo đơn trả sách để Admin theo dõi vận chuyển; phí trễ (nếu có) chốt khi Admin xác nhận đã nhận lại sách.</p>
                 <div data-checkout-summary><p class="loading-state">Đang tính tiền từ server...</p></div>
                 <div class="form-group"><label class="form-label" for="checkout-recipient">Người nhận</label><input class="form-control" id="checkout-recipient" name="recipient_name" required maxlength="255"></div>
                 <div class="form-group"><label class="form-label" for="checkout-phone">Số điện thoại</label><input class="form-control" id="checkout-phone" name="phone" required maxlength="30"></div>
                 <div class="form-group"><label class="form-label" for="checkout-address">Địa chỉ</label><input class="form-control" id="checkout-address" name="address_line" required maxlength="500"></div>
                 <div class="form-group"><label class="form-label" for="checkout-city">Tỉnh / thành phố</label><input class="form-control" id="checkout-city" name="city" required maxlength="255"></div>
-                <div class="form-group" data-checkout-payment-method><label class="form-label" for="checkout-payment-method">Phương thức thanh toán</label><select class="form-control" id="checkout-payment-method" name="payment_method"><option value="FAKE">Online · Fake Payment Provider (local/test)</option><option value="COD">Thanh toán khi nhận hàng (COD)</option><option value="BANK_TRANSFER">Chuyển khoản ngân hàng</option></select></div>
+                <div class="form-group" data-checkout-payment-method><label class="form-label" for="checkout-payment-method">Phương thức thanh toán</label><select class="form-control" id="checkout-payment-method" name="payment_method"><option value="FAKE">Online · Fake Payment Provider (local/test)</option><option value="COD" selected>Thanh toán khi nhận hàng (COD)</option><option value="BANK_TRANSFER">Chuyển khoản ngân hàng</option></select></div>
                 <div class="form-group" data-fake-payment-options>
                     <label class="form-label" for="checkout-payment-outcome">Kết quả Fake Payment (local/test)</label>
                     <select class="form-control" id="checkout-payment-outcome" name="payment_outcome"><option value="SUCCESS">Thành công</option><option value="FAILURE">Thất bại</option><option value="CANCEL">Hủy</option></select>
@@ -43,6 +43,6 @@
     <script src="js/core/storage.js"></script><script src="js/core/errors.js"></script><script src="js/core/auth.js"></script><script src="js/core/router.js"></script><script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js?v=borrow-workflow-20261005"></script><script src="js/components/commerce/cards.js?v=borrow-admin-delivery-20261005"></script>
     <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/orders-api.js?v=borrow-workflow-20261005"></script><script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js?v=sale-cart-20261005"></script><script src="js/workspace.js?v=borrow-admin-delivery-20261005"></script>
+    <script src="js/main.js?v=borrow-return-overdue-20261005"></script><script src="js/workspace.js?v=borrow-return-overdue-20261005"></script>
 </body>
 </html>

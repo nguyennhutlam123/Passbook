@@ -4,11 +4,13 @@ from unittest.mock import Mock, patch
 
 from django.contrib import admin
 from django.test import SimpleTestCase
+from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from .admin import ReportAdmin
 from .admin_api_views import (
+    AdminReportSerializer,
     AdminReportDetailView,
     AdminReportListView,
     AdminReportUpdateSerializer,
@@ -48,6 +50,59 @@ class ReportCreateValidationTests(SimpleTestCase):
                 'OTHER',
             },
         )
+
+    def test_users_cannot_report_themselves_or_their_own_listings(self):
+        reporter = SimpleNamespace(id=18, is_authenticated=True)
+        serializer = ReportCreateSerializer(context={
+            'request': SimpleNamespace(user=reporter),
+        })
+        cases = (
+            (
+                {'reported_user': SimpleNamespace(id=18)},
+                'reported_user_id',
+            ),
+            (
+                {'sale_listing': SimpleNamespace(seller_id=18)},
+                'sale_listing_id',
+            ),
+            (
+                {'lend_listing': SimpleNamespace(lender_id=18)},
+                'lend_listing_id',
+            ),
+        )
+        for attrs, expected_field in cases:
+            with self.subTest(expected_field=expected_field):
+                with self.assertRaises(serializers.ValidationError) as raised:
+                    serializer.validate(attrs)
+                self.assertIn(expected_field, raised.exception.detail)
+
+    def test_message_reports_are_limited_to_other_members_of_the_conversation(self):
+        reporter = SimpleNamespace(id=18, is_authenticated=True)
+        serializer = ReportCreateSerializer(context={
+            'request': SimpleNamespace(user=reporter),
+        })
+        own_message = SimpleNamespace(sender_id=18, conversation_id=7)
+        with self.assertRaises(serializers.ValidationError) as raised:
+            serializer.validate({'message': own_message})
+        self.assertIn('message_id', raised.exception.detail)
+
+        other_message = SimpleNamespace(sender_id=29, conversation_id=7)
+        with patch(
+            'reports.serializers.ConversationMember.objects.filter',
+        ) as members:
+            members.return_value.exists.return_value = False
+            with self.assertRaises(serializers.ValidationError) as raised:
+                serializer.validate({'message': other_message})
+        self.assertIn('message_id', raised.exception.detail)
+
+        with patch(
+            'reports.serializers.ConversationMember.objects.filter',
+        ) as members:
+            members.return_value.exists.return_value = True
+            self.assertEqual(
+                serializer.validate({'message': other_message}),
+                {'message': other_message},
+            )
 
 
 class ReportModerationSerializerTests(SimpleTestCase):
@@ -145,6 +200,86 @@ class ReportAuthorizationTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         select_related.assert_called_once()
+
+    def test_admin_report_status_change_notifies_reporter(self):
+        self.user.role = 'ADMIN'
+        reporter = SimpleNamespace(id=18)
+        report = SimpleNamespace(
+            id=52,
+            reporter_id=reporter.id,
+            reporter=reporter,
+            status='OPEN',
+            handled_by=None,
+            resolution_note=None,
+            resolved_at=None,
+            save=Mock(),
+        )
+        request = self.factory.patch(
+            '/api/admin/reports/52/',
+            {'status': 'IN_REVIEW'},
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+        api_request = AdminReportDetailView().initialize_request(request)
+
+        with patch(
+            'reports.admin_api_views.Report.objects.select_for_update',
+        ), patch(
+            'reports.admin_api_views.get_object_or_404',
+            return_value=report,
+        ), patch(
+            'reports.admin_api_views.AdminReportSerializer',
+        ) as response_serializer, patch(
+            'notifications.services.create_notification',
+        ) as notify:
+            response_serializer.return_value.data = {'id': report.id}
+            response = AdminReportDetailView.patch.__wrapped__(
+                AdminReportDetailView(),
+                api_request,
+                report_id=report.id,
+            )
+
+        self.assertEqual(response.data, {'id': report.id})
+        self.assertEqual(report.status, 'IN_REVIEW')
+        notify.assert_called_once_with(
+            reporter.id,
+            notification_type='REPORT',
+            title='Cập nhật báo cáo #52',
+            content='Báo cáo của bạn đang được Admin xem xét.',
+            entity_type='REPORT',
+            entity_id=report.id,
+        )
+
+    def test_admin_report_serializer_includes_reported_message_context(self):
+        message = SimpleNamespace(content='Reported private message', sender_id=29)
+        report = SimpleNamespace(
+            id=52,
+            reporter_id=18,
+            reporter=SimpleNamespace(full_name='Reporter'),
+            reported_user_id=None,
+            reported_user=None,
+            book_id=None,
+            book=None,
+            sale_listing_id=None,
+            sale_listing=None,
+            lend_listing_id=None,
+            lend_listing=None,
+            message_id=74,
+            message=message,
+            reason='SPAM',
+            description='Please review',
+            status='OPEN',
+            handled_by_id=None,
+            resolution_note=None,
+            created_at=None,
+            resolved_at=None,
+        )
+
+        data = AdminReportSerializer(report).data
+
+        self.assertEqual(data['message_id'], report.message_id)
+        self.assertEqual(data['message_content'], message.content)
+        self.assertEqual(data['message_sender_id'], message.sender_id)
 
 
 class ReportCreationTests(SimpleTestCase):

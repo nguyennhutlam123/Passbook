@@ -118,10 +118,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         return row;
                     }));
                     if (isBorrow && !selectedCheckoutIsBorrow) {
-                        previousPaymentMethod = paymentMethod?.value || "FAKE";
+                        previousPaymentMethod = paymentMethod?.value || "COD";
                     }
                     if (!isBorrow && selectedCheckoutIsBorrow && paymentMethod) {
-                        paymentMethod.value = previousPaymentMethod || "FAKE";
+                        paymentMethod.value = previousPaymentMethod || "COD";
                     }
                     selectedCheckoutIsBorrow = isBorrow;
                     if (isBorrow && paymentMethod) paymentMethod.value = "COD";
@@ -152,7 +152,9 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const cart = await OrdersAPI.cart();
             const items = Array.isArray(cart.items) ? cart.items : [];
-            const buyNowListingId = new URLSearchParams(location.search).get("buy_now");
+            const params = new URLSearchParams(location.search);
+            const buyNowListingId = params.get("buy_now");
+            const buyNowListingType = params.get("buy_now_type");
             if (!items.length) {
                 const empty = PassbookCommonComponents.emptyStateElement(
                     "Giỏ hàng đang trống.",
@@ -170,6 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (buyNowListingId) {
                     const query = new URLSearchParams(location.search);
                     query.delete("buy_now");
+                    query.delete("buy_now_type");
                     const suffix = query.toString();
                     history.replaceState(null, "", `${location.pathname}${suffix ? `?${suffix}` : ""}${location.hash}`);
                     cartError.textContent = "Không tìm thấy sách vừa chọn. Kiểm tra lại giỏ hàng.";
@@ -183,18 +186,23 @@ document.addEventListener("DOMContentLoaded", () => {
             cartError.textContent = "";
             if (buyNowListingId && !buyNowProcessed) {
                 buyNowProcessed = true;
-                const target = items.find((item) =>
-                    String(item.listing_id) === buyNowListingId,
+                const targets = items.filter((item) =>
+                    String(item.listing_id) === buyNowListingId
+                    && (!buyNowListingType || item.listing_type === buyNowListingType),
                 );
+                const target = targets.length === 1 ? targets[0] : null;
                 const query = new URLSearchParams(location.search);
                 query.delete("buy_now");
+                query.delete("buy_now_type");
                 const suffix = query.toString();
                 history.replaceState(null, "", `${location.pathname}${suffix ? `?${suffix}` : ""}${location.hash}`);
                 if (target) {
                     cartItems.querySelector(`[data-cart-item="${CSS.escape(String(target.id))}"]`)
                         ?.querySelector("[data-cart-buy]")?.click();
                 } else {
-                    cartError.textContent = "Không tìm thấy sách vừa chọn. Kiểm tra lại giỏ hàng.";
+                    cartError.textContent = targets.length
+                        ? "Không xác định được chính xác sách vừa chọn. Vui lòng chọn sách trong giỏ hàng."
+                        : "Không tìm thấy sách vừa chọn. Kiểm tra lại giỏ hàng.";
                 }
             }
             if (selectedCartItemId && !items.some((item) => item.id === selectedCartItemId)) {
@@ -234,7 +242,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (checkoutSubmit) checkoutSubmit.textContent = "Đặt hàng";
         if (borrowCheckoutNote) borrowCheckoutNote.hidden = true;
         if (selectedCheckoutIsBorrow && paymentMethod) {
-            paymentMethod.value = previousPaymentMethod || "FAKE";
+            paymentMethod.value = previousPaymentMethod || "COD";
         }
         selectedCheckoutIsBorrow = false;
         updatePaymentInstructions();
@@ -248,7 +256,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const codNote = checkoutForm?.querySelector("[data-cod-note]");
     const updatePaymentInstructions = () => {
         const method = paymentMethod?.value;
-        if (paymentMethodGroup) paymentMethodGroup.hidden = selectedCheckoutIsBorrow;
+        if (paymentMethod) {
+            if (selectedCheckoutIsBorrow) paymentMethod.value = "COD";
+            paymentMethod.disabled = selectedCheckoutIsBorrow;
+            for (const option of paymentMethod.options) {
+                const unavailable = selectedCheckoutIsBorrow && option.value !== "COD";
+                option.hidden = unavailable;
+                option.disabled = unavailable;
+            }
+        }
+        if (paymentMethodGroup) paymentMethodGroup.hidden = false;
         if (fakeOptions) fakeOptions.hidden = selectedCheckoutIsBorrow || method !== "FAKE";
         if (bankTransferNote) bankTransferNote.hidden = selectedCheckoutIsBorrow || method !== "BANK_TRANSFER";
         if (codNote) codNote.hidden = selectedCheckoutIsBorrow || method !== "COD";
@@ -679,22 +696,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const borrowActionOptions = (borrow) => {
         const isBorrower = Number(borrow.borrower_id) === Number(currentUser.id);
-        const isLender = Number(borrow.lender_id) === Number(currentUser.id);
-        if (borrow.status === "PENDING") {
-            return isBorrower
-                ? [["cancel", "Hủy yêu cầu"]]
-                : isLender ? [["confirm", "Xác nhận"], ["reject", "Từ chối"]] : [];
-        }
-        if (borrow.status === "READY_FOR_PICKUP" && isBorrower) return [["start", "Đã nhận sách"]];
+        if (borrow.status === "PENDING" && isBorrower) return [["cancel", "Hủy yêu cầu"]];
         if (
             ["ACTIVE", "OVERDUE"].includes(borrow.status)
             && isBorrower
         ) return [["request-return", "Trả sách"]];
-        if (
-            borrow.status === "RETURNED"
-            && borrow.return_status === "DELIVERED"
-            && isLender
-        ) return [["complete", "Xác nhận đã nhận sách"]];
         return [];
     };
 
@@ -723,8 +729,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     READY_FOR_PICKUP: "Sẵn sàng nhận sách",
                     ACTIVE: "Đang mượn",
                     RETURN_REQUESTED: "Đang trả sách",
-                    RETURNED: "Đã giao đến người cho mượn · chờ xác nhận",
-                    COMPLETED: "Đã trả sách",
+                    RETURNED: "Đã giao đến người cho mượn",
+                    COMPLETED: "Đã trả sách thành công",
                     REJECTED: "Đã từ chối",
                     CANCELLED: "Đã hủy",
                     OVERDUE: "Quá hạn",
@@ -743,10 +749,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         : borrow.status === "CONFIRMED"
                             ? "Admin tiếp nhận, giao sách và cập nhật trạng thái vận chuyển tại đây."
                             : ["ACTIVE", "OVERDUE"].includes(borrow.status)
-                                ? "Sách đã được giao. Khi trả, người mượn gửi yêu cầu; Admin cập nhật vận chuyển."
-                                : borrow.status === "RETURNED"
-                                    ? "Chờ người cho mượn xác nhận đã nhận lại sách."
-                                    : "";
+                                ? "Sách đã giao và thanh toán COD thành công. Khi trả, người mượn gửi yêu cầu; Admin quản lý vận chuyển và xác nhận hoàn tất."
+                                : borrow.status === "RETURN_REQUESTED"
+                                    ? "Admin đang quản lý đơn trả sách và cập nhật trạng thái vận chuyển."
+                                    : borrow.status === "COMPLETED"
+                                        ? "Admin đã xác nhận nhận lại sách. Phiếu mượn đã hoàn tất."
+                                        : "";
                 const details = ticketDetails([
                     ["Mã giao dịch", borrow.order_code || String(borrow.order_id || "")],
                     ["Người cho mượn", borrow.lender_name],
@@ -770,6 +778,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     ["Đã trả", borrow.actual_return_at
                         ? new Date(borrow.actual_return_at).toLocaleString("vi-VN")
                         : "Chưa trả"],
+                    ["Ngày quá hạn (24 giờ trọn vẹn)", borrow.late_days || 0],
+                    ["Phí trễ tạm tính", money(borrow.late_fee_estimate)],
+                    ["Phí trễ đã chốt", money(borrow.late_fee_amount)],
                     ["Trạng thái trả", borrow.return_status || "Chưa yêu cầu trả"],
                     ["Cách trả", returnMethodLabel(
                         borrow.return_method || borrow.borrow_terms?.return_method,

@@ -23,10 +23,8 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="book-subject">Môn học *</label>
-                    <select id="book-subject" name="subject_id">
-                        <option value="">Chọn môn học</option>
-                    </select>
-                    <span class="form-error" data-error-for="subject_id"></span>
+                    <input id="book-subject" name="subject_name" type="text" maxlength="255" autocomplete="off">
+                    <span class="form-error" data-error-for="subject_name"></span>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="book-code">Danh mục</label>
@@ -81,11 +79,11 @@
                             <select id="borrow-return-method" name="return_method">
                                 <option value="IN_PERSON">Gặp trực tiếp</option>
                                 <option value="POSTAL">Gửi bưu điện</option>
+                                <option value="DELIVERY">Giao hàng</option>
                             </select>
                             <span class="form-error" data-error-for="return_method"></span>
                         </div>
                         <div class="form-group form-group--wide">
-                            <label><input type="checkbox" name="deposit_required"> Bắt buộc đặt cọc</label>
                             <label class="form-label" for="borrow-terms-notes">Ghi chú điều kiện mượn</label>
                             <textarea id="borrow-terms-notes" name="terms_notes"></textarea>
                         </div>
@@ -160,7 +158,7 @@
     <script src="js/api/auth-api.js"></script>
     <script src="js/api/books-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js"></script>
-    <script src="js/sell.js"></script>
+    <script src="js/main.js?v=buy-now-type-20261005"></script>
+    <script src="js/sell.js?v=listing-review-20261005"></script>
 </body>
 </html>

@@ -67,6 +67,11 @@
         const borrowTerms = book.listing_type === "BORROW"
             ? `<p class="book-card__subject">${book.borrow_terms?.max_days ? `Tối đa ${escape(book.borrow_terms.max_days)} ngày` : "Thời hạn theo thỏa thuận"}${Number(book.deposit_amount) > 0 ? ` · Cọc ${global.formatPrice(Number(book.deposit_amount))}` : ""}</p>`
             : "";
+        const reviewCount = Number(book.review_count) || 0;
+        const averageRating = Number(book.average_rating);
+        const ratingSummary = reviewCount && Number.isFinite(averageRating)
+            ? `<p class="book-card__rating" aria-label="Đánh giá ${averageRating.toFixed(1)} trên 5 sao, ${reviewCount} lượt">${"★"} ${averageRating.toFixed(1)} <span>(${reviewCount})</span></p>`
+            : "";
         return `<article class="book-card">
             <a class="book-card__cover-link" href="${detailUrl}" aria-label="Xem ${title}">
                 <div class="book-card__cover">
@@ -80,6 +85,7 @@
                 ${category ? `<p class="book-card__category">${escape(category)}</p>` : ""}
                 <p class="book-card__subject">${subject}${code ? ` · ${code}` : ""}</p>
                 ${badge}
+                ${ratingSummary}
                 <strong class="price">${book.listing_type === "BORROW" ? "Phí mượn · " : ""}${global.formatPrice(Number(book.price) || 0)}</strong>
                 ${borrowTerms}
                 <div class="seller-line"><span>${seller}</span></div>

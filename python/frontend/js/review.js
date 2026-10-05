@@ -77,12 +77,16 @@ document.addEventListener("DOMContentLoaded", () => {
             title.textContent = `${order.order_code} · ${(order.items || []).map((item) => item.title).join(", ")}`;
             const status = document.createElement("p");
             status.textContent = `Trạng thái giao dịch: ${order.status}`;
-            orderSummary.replaceChildren(title, status);
+            const reviewTarget = document.createElement("p");
+            reviewTarget.textContent = `Sách được đánh giá: ${order.review_target_title || order.items?.[0]?.title || "—"}`;
+            orderSummary.replaceChildren(title, status, reviewTarget);
             renderReviews(order.reviews || []);
-            if (order.status !== "COMPLETED") {
+            if (!order.can_review) {
                 orderSummary.append(PassbookCommonComponents.emptyStateElement(
-                    "Đơn hàng chưa đủ điều kiện đánh giá.",
-                    "Bạn chỉ có thể gửi đánh giá sau khi giao dịch hoàn tất.",
+                    "Bạn chưa thể đánh giá sách trong giao dịch này.",
+                    order.status !== "COMPLETED"
+                        ? "Bạn chỉ có thể gửi đánh giá sau khi giao dịch hoàn tất."
+                        : "Chỉ người mua trong giao dịch mới có thể đánh giá sách.",
                 ));
                 return;
             }

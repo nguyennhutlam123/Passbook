@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yêu cầu sách - PassBook</title>
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/workspace.css">
+    <link rel="stylesheet" href="css/style.css?v=report-message-20261006">
+    <link rel="stylesheet" href="css/workspace.css?v=report-message-20261006">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
     <main class="page-shell" data-requests-page>
         <section class="requests-intro">
-            <div><span class="eyebrow">Kết nối cộng đồng</span><h1>Yêu cầu sách</h1><p class="text-secondary">Đăng sách bạn đang tìm mua, muốn mượn hoặc có nhu cầu bán.</p></div>
+            <div><span class="eyebrow">Kết nối cộng đồng</span><h1>Yêu cầu sách</h1><p class="text-secondary">Chia sẻ sách bạn dự định mua, mượn hoặc bán. Người có nhu cầu phù hợp có thể liên hệ riêng với bạn.</p></div>
             <button class="button button-outline" type="button" data-request-refresh>Tải lại</button>
         </section>
         <div class="requests-layout">
@@ -44,6 +44,8 @@
                 </div>
                 <label class="form-label" for="request-expires">Ngày hết hạn (không bắt buộc)</label>
                 <input class="form-control" id="request-expires" name="expires_at" type="datetime-local">
+                <label class="form-label" for="request-planned" data-request-planned-label>Ngày dự định mua (không bắt buộc)</label>
+                <input class="form-control" id="request-planned" name="planned_at" type="datetime-local">
                 <div class="request-form__actions">
                     <button class="button button-primary" type="submit">Đăng yêu cầu</button>
                     <button class="button button-outline" type="button" data-request-edit-cancel hidden>Hủy sửa</button>
@@ -54,6 +56,7 @@
                 <section class="workspace-section request-group">
                     <div class="section-heading"><div><span class="eyebrow">Cá nhân</span><h2>Yêu cầu của bạn</h2></div></div>
                     <div class="request-list" data-own-request-list><p class="loading-state">Đang tải yêu cầu...</p></div>
+                    <div data-own-request-pagination></div>
                 </section>
                 <section class="workspace-section request-group">
                     <div class="section-heading"><div><span class="eyebrow">Cộng đồng</span><h2>Đang cần sách</h2></div></div>
@@ -76,12 +79,14 @@
     <script src="js/core/router.js"></script>
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js"></script>
+    <script src="js/components/messaging/cards.js?v=report-message-20261006"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
     <script src="js/api/books-api.js"></script>
-    <script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js"></script>
-    <script src="js/requests.js"></script>
+    <script src="js/api/messaging-api.js"></script>
+    <script src="js/api/reports-api.js"></script>
+    <script src="js/main.js?v=report-message-20261006"></script>
+    <script src="js/requests.js?v=book-requests-20261006"></script>
 </body>
 </html>

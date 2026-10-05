@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum, Value
+from django.db.models import Count, Exists, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -17,7 +17,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from users.models import User, UserAddress
-from notifications.services import notify_order_parties
+from notifications.services import (
+    notify_borrow_order_parties,
+    notify_order_parties,
+)
 from .models import (
     Book,
     BookImage,
@@ -46,8 +49,10 @@ from .services import (
     FakePaymentProvider,
     PaymentProviderUnavailable,
     calculate_payment_split,
+    calculate_borrow_late_fee,
     fake_payments_enabled,
     get_payment_provider,
+    mark_overdue_borrow_orders,
     transition_borrow_order,
     transition_fake_payment,
     transition_fake_refund,
@@ -61,6 +66,7 @@ from .shipment_services import (
     validate_shipment_transition,
 )
 from .pagination import BookPagination
+from .api_views import prefetch_book_reviews
 
 
 def _query_integer(params, name):
@@ -532,7 +538,7 @@ class CheckoutView(APIView):
         if payment_method == 'FAKE' and not fake_payments_enabled():
             return Response(
                 {'detail': 'Thanh toán giả lập chỉ khả dụng trong local/test.'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                status=status.HTTP_400_BAD_REQUEST,
             )
         payment_provider = None
         if payment_method == 'FAKE':
@@ -802,7 +808,7 @@ class CheckoutView(APIView):
                                 'Yêu cầu mượn đã được tạo; COD sẽ được thu khi Admin giao sách.'
                                 if order.order_type == 'BORROW'
                                 else 'Đơn hàng COD đã được tạo; tiền sẽ thu khi giao hàng. '
-                                'Xác nhận thu tiền COD chưa được hỗ trợ.'
+                                'Admin xác nhận thu tiền khi cập nhật giao hàng thành công.'
                             )
                             if payment_method == 'COD'
                             else (
@@ -1018,11 +1024,6 @@ class LendListingListCreateView(APIView):
                 to_attr='listing_terms',
             ),
             'book__book_edition__identifiers',
-            Prefetch(
-                'reviews',
-                queryset=Review.objects.select_related('reviewer').order_by('-created_at', '-id'),
-                to_attr='listing_reviews',
-            ),
         )
         active_intents = BookRequest.objects.filter(
             book_work_id=OuterRef('book__book_edition__book_work_id'),
@@ -1137,6 +1138,11 @@ class LendListingListCreateView(APIView):
         language_id = _query_integer(params, 'language_id')
         if language_id is not None:
             queryset = queryset.filter(book__book_edition__language_id=language_id)
+        language = (params.get('language') or '').strip()
+        if language:
+            queryset = queryset.filter(
+                book__book_edition__language__name__icontains=language,
+            )
         edition = (params.get('edition') or '').strip()
         if edition:
             queryset = queryset.filter(
@@ -1198,6 +1204,7 @@ class LendListingListCreateView(APIView):
         queryset = queryset.order_by(*sort_options[sort])
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
+        prefetch_book_reviews([listing.book for listing in page])
         return paginator.get_paginated_response([
             lend_listing_payload(listing) for listing in page
         ])
@@ -1254,6 +1261,7 @@ class LendListingListCreateView(APIView):
                 updated_at=now,
             )
             listing.listing_terms = terms
+        prefetch_book_reviews([listing.book])
         return Response(lend_listing_payload(listing), status=status.HTTP_201_CREATED)
 
 
@@ -1278,8 +1286,10 @@ class LendListingInputSerializer(serializers.Serializer):
         allow_null=True,
     )
     deposit_required = serializers.BooleanField(required=False, default=False)
-    shipping_paid_by = serializers.CharField(max_length=20)
-    return_method = serializers.CharField(max_length=30)
+    shipping_paid_by = serializers.ChoiceField(choices=('BORROWER', 'LENDER'))
+    return_method = serializers.ChoiceField(
+        choices=('IN_PERSON', 'POSTAL', 'DELIVERY'),
+    )
     terms_notes = serializers.CharField(required=False, allow_blank=True)
 
 
@@ -1333,14 +1343,10 @@ class LendListingDetailView(APIView):
                     to_attr='listing_terms',
                 ),
                 'book__book_edition__identifiers',
-                Prefetch(
-                    'reviews',
-                    queryset=Review.objects.select_related('reviewer').order_by('-created_at', '-id'),
-                    to_attr='listing_reviews',
-                ),
             ),
             pk=listing_id,
         )
+        prefetch_book_reviews([listing.book])
         return Response(lend_listing_payload(listing))
 
 
@@ -1372,7 +1378,9 @@ def lend_listing_payload(listing):
         ),
         None,
     )
-    reviews = getattr(listing, 'listing_reviews', None)
+    reviews = getattr(book, '_prefetched_book_reviews', None)
+    if reviews is None:
+        reviews = getattr(listing, 'listing_reviews', None)
     if reviews is None:
         reviews = listing.reviews.select_related('reviewer').order_by('-created_at', '-id')
     seller = {
@@ -1455,6 +1463,13 @@ def lend_listing_payload(listing):
             if language else None
         ),
         'reviews': serialized_reviews,
+        'average_rating': getattr(
+            book,
+            '_book_average_rating',
+            round(sum(review['rating'] for review in serialized_reviews) / len(serialized_reviews), 1)
+            if serialized_reviews else None,
+        ),
+        'review_count': getattr(book, '_book_review_count', len(serialized_reviews)),
         'category': (
             {'id': work.category_id, 'name': work.category.name}
             if work.category_id else None
@@ -1767,6 +1782,9 @@ class BorrowOrderReturnRequestView(APIView):
         )
         if request.user.id != borrow.borrower_id:
             raise PermissionDenied('Chỉ người mượn mới có thể tạo yêu cầu trả sách.')
+        mark_overdue_borrow_orders()
+        if hasattr(borrow, 'refresh_from_db'):
+            borrow.refresh_from_db(fields=['status'])
         serializer = BorrowReturnInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         if borrow.status not in ('ACTIVE', 'OVERDUE'):
@@ -1821,6 +1839,15 @@ class BorrowOrderReturnRequestView(APIView):
             'return_notes',
             'updated_at',
         ])
+        notify_borrow_order_parties(
+            borrow,
+            title='Yêu cầu trả sách đang được vận chuyển',
+            content=(
+                f'Người mượn đã tạo yêu cầu trả cho phiếu #{borrow.id}. '
+                'Admin sẽ cập nhật trạng thái vận chuyển và xác nhận khi nhận lại sách.'
+            ),
+            recipient_ids=(borrow.lender_id,),
+        )
         return Response({
             'id': borrow.id,
             'status': borrow.status,
@@ -1842,12 +1869,12 @@ class ReviewCreateView(APIView):
 
     def post(self, request, order_id):
         order = get_object_or_404(Order, pk=order_id, status='COMPLETED')
-        if request.user.id not in (order.buyer_id, order.seller_id):
-            raise PermissionDenied('Chỉ người mua hoặc người bán mới có thể đánh giá.')
+        if request.user.id != order.buyer_id:
+            raise PermissionDenied('Chỉ người mua mới có thể đánh giá sách.')
         serializer = ReviewInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         if order.order_type == 'SALE':
-            listing = order.sale_items.select_related('sale_listing').first()
+            listing = order.sale_items.select_related('sale_listing').order_by('id').first()
             if listing is None:
                 raise serializers.ValidationError('Đơn hàng không có mặt hàng để đánh giá.')
             target = {'sale_listing': listing.sale_listing, 'lend_listing': None}
@@ -1884,7 +1911,12 @@ class ReviewCreateView(APIView):
 
 class ReviewInputSerializer(serializers.Serializer):
     rating = serializers.IntegerField(min_value=1, max_value=5)
-    comment = serializers.CharField(required=False, allow_blank=True)
+    comment = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=5000,
+        trim_whitespace=True,
+    )
 
 
 class ReturnCreateView(APIView):
@@ -2125,6 +2157,10 @@ def checkout_payload(checkout):
                 'order_code': order.order_code,
                 'order_type': order.order_type,
                 'status': order.status,
+                'can_review': (
+                    order.status == 'COMPLETED'
+                    and request.user.id == order.buyer_id
+                ),
                 'subtotal': str(order.subtotal),
                 'shipping_fee': str(order.shipping_fee),
                 'total_amount': str(order.total_amount),
@@ -2225,6 +2261,10 @@ class OrderListView(APIView):
                 'order_code': order.order_code,
                 'order_type': order.order_type,
                 'status': order.status,
+                'can_review': (
+                    order.status == 'COMPLETED'
+                    and request.user.id == order.buyer_id
+                ),
                 'subtotal': str(order.subtotal),
                 'shipping_fee': str(order.shipping_fee),
                 'total_amount': str(order.total_amount),
@@ -2271,7 +2311,10 @@ class OrderDetailView(APIView):
             ).prefetch_related(
                 Prefetch(
                     'sale_items',
-                    queryset=SaleOrderItem.objects.select_related('book', 'sale_listing').prefetch_related(
+                    queryset=SaleOrderItem.objects.select_related(
+                        'book',
+                        'sale_listing',
+                    ).order_by('id').prefetch_related(
                         Prefetch(
                             'book__images',
                             queryset=BookImage.objects.filter(is_primary=True).order_by('sort_order', 'id'),
@@ -2283,7 +2326,10 @@ class OrderDetailView(APIView):
                 'shipments__tracking_events',
                 Prefetch(
                     'reviews',
-                    queryset=Review.objects.select_related('reviewer').order_by('-created_at', '-id'),
+                    queryset=Review.objects.filter(
+                        reviewer_id=F('order__buyer_id'),
+                        order__status='COMPLETED',
+                    ).select_related('reviewer').order_by('-created_at', '-id'),
                     to_attr='order_reviews',
                 ),
                 Prefetch(
@@ -2330,6 +2376,8 @@ class OrderDetailView(APIView):
             'order_code': order.order_code,
             'order_type': order.order_type,
             'status': order.status,
+            'can_review': order.status == 'COMPLETED' and request.user.id == order.buyer_id,
+            'review_target_title': items[0]['title'] if items else None,
             'subtotal': str(order.subtotal),
             'shipping_fee': str(order.shipping_fee),
             'total_amount': str(order.total_amount),
@@ -2474,6 +2522,7 @@ class BorrowOrderListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        mark_overdue_borrow_orders()
         queryset = BorrowOrder.objects.filter(
             Q(borrower=request.user) | Q(lender=request.user),
         ).select_related(
@@ -2510,6 +2559,10 @@ class BorrowOrderListView(APIView):
 
     @staticmethod
     def _borrow_payload(borrow):
+        late_fee = calculate_borrow_late_fee(
+            borrow,
+            at=borrow.actual_return_at or timezone.now(),
+        )
         shipments = getattr(borrow.order, 'borrow_shipments', ())
         return_shipment = next((
             shipment for shipment in shipments
@@ -2564,6 +2617,10 @@ class BorrowOrderListView(APIView):
             'expected_return_at': borrow.expected_return_at,
             'actual_start_at': borrow.actual_start_at,
             'actual_return_at': borrow.actual_return_at,
+            'late_days': late_fee['late_days'],
+            'late_fee_per_day': str(late_fee['late_fee_per_day']),
+            'late_fee_estimate': str(late_fee['late_fee_amount']),
+            'late_fee_amount': str(borrow.late_fee_amount),
             'return_status': borrow.return_status,
             'return_method': borrow.return_method,
             'return_tracking_code': borrow.return_tracking_code,
@@ -2590,9 +2647,7 @@ class BorrowOrderListView(APIView):
 
 class BorrowOrderActionView(APIView):
     permission_classes = [IsAuthenticated]
-    ACTIONS = {
-        'confirm', 'reject', 'ready', 'start', 'complete', 'cancel',
-    }
+    ACTIONS = {'cancel'}
 
     def post(self, request, borrow_order_id, action):
         if action not in self.ACTIONS:

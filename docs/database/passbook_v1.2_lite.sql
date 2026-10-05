@@ -338,7 +338,7 @@ CREATE TABLE `lend_listings` (
   CONSTRAINT `ck_lend_listings_1` CHECK (`rental_fee` >= 0),
   CONSTRAINT `ck_lend_listings_2` CHECK (`deposit_amount` IS NULL OR `deposit_amount` >= 0),
   CONSTRAINT `ck_lend_listings_3` CHECK (`currency` = 'VND'),
-  CONSTRAINT `ck_lend_listings_4` CHECK (`status` IN ('DRAFT','ACTIVE','RESERVED','ON_LOAN','CLOSED','EXPIRED')),
+  CONSTRAINT `ck_lend_listings_4` CHECK (`status` IN ('DRAFT','PENDING','ACTIVE','RESERVED','ON_LOAN','CLOSED','EXPIRED')),
   CONSTRAINT `fk_lend_listings_1` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_lend_listings_2` FOREIGN KEY (`lender_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -375,6 +375,7 @@ CREATE TABLE `book_requests` (
   `currency` CHAR(3) NULL DEFAULT NULL,
   `condition_preference` VARCHAR(30) NULL DEFAULT NULL,
   `status` VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+  `planned_at` DATETIME(3) NULL DEFAULT NULL,
   `expires_at` DATETIME(3) NULL DEFAULT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),

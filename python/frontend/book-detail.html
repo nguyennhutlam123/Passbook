@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chi tiết giáo trình - PassBook</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=book-rating-20261006">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
@@ -14,10 +14,6 @@
             <section class="detail-gallery" aria-label="Ảnh giáo trình">
                 <img class="detail-gallery__main" data-detail-main-image src="" alt="">
                 <div class="detail-gallery__thumbs" data-detail-thumbs></div>
-                <section class="detail-reviews" data-detail-reviews aria-labelledby="detail-reviews-title" hidden>
-                    <h2 data-review-title id="detail-reviews-title">Đánh giá sách</h2>
-                    <div data-review-list><p class="loading-state">Đang tải đánh giá...</p></div>
-                </section>
             </section>
             <section class="detail-info">
                 <div data-detail-status></div>
@@ -38,6 +34,11 @@
                 <div class="detail-actions" data-detail-actions></div>
             </section>
         </div>
+        <section class="detail-reviews" data-detail-reviews aria-labelledby="detail-reviews-title">
+            <h2 data-review-title id="detail-reviews-title">Đánh giá sách</h2>
+            <p class="detail-review-summary" data-review-summary></p>
+            <div data-review-list><p class="loading-state">Đang tải đánh giá...</p></div>
+        </section>
     </main>
     <footer class="site-footer" data-site-footer></footer>
     <script src="js/core/storage.js"></script>
@@ -46,7 +47,7 @@
     <script src="js/core/router.js"></script>
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js?v=borrow-workflow-20261005"></script>
-    <script src="js/components/messaging/cards.js"></script>
+    <script src="js/components/messaging/cards.js?v=report-message-20261006"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
     <script src="js/api/auth-api.js"></script>
@@ -56,7 +57,7 @@
     <script src="js/api/messaging-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
     <script src="js/api/reports-api.js"></script>
-    <script src="js/main.js?v=sale-cart-20261005"></script>
+    <script src="js/main.js?v=report-message-20261006"></script>
     <script src="js/book-detail.js?v=sale-cart-20261005"></script>
 </body>
 </html>

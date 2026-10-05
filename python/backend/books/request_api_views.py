@@ -1,7 +1,8 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, IntegerField, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -10,6 +11,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from messaging.models import Message
+from messaging.services import get_or_create_private_conversation
+from notifications.services import create_notification
 from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .models import (
     Book,
@@ -70,6 +74,7 @@ class BookRequestInputSerializer(serializers.Serializer):
         allow_blank=True,
         allow_null=True,
     )
+    planned_at = serializers.DateTimeField(required=False, allow_null=True)
     expires_at = serializers.DateTimeField(required=False, allow_null=True)
 
     def validate(self, attrs):
@@ -87,6 +92,15 @@ class BookRequestInputSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 'Cần chọn đầu sách hoặc nhập từ khóa tiêu đề.',
             )
+        if (
+            'title_keyword' in attrs
+            and 'book_work' not in attrs
+            and (
+                self.instance is None
+                or attrs['title_keyword'] != self.instance.title_keyword
+            )
+        ):
+            attrs['book_work'] = None
         budget_max = attrs.get('budget_max', getattr(self.instance, 'budget_max', None))
         asking_price = attrs.get(
             'asking_price',
@@ -97,13 +111,45 @@ class BookRequestInputSerializer(serializers.Serializer):
                 raise serializers.ValidationError({'budget_max': 'Không áp dụng cho SELL_INTENT.'})
         elif asking_price is not None:
             raise serializers.ValidationError({'asking_price': 'Chỉ áp dụng cho SELL_INTENT.'})
-        if attrs.get('expires_at') and attrs['expires_at'] <= timezone.now():
+        if (
+            'expires_at' in attrs
+            and attrs['expires_at'] is not None
+            and attrs['expires_at'] <= timezone.now()
+        ):
             raise serializers.ValidationError({'expires_at': 'Thời hạn phải ở tương lai.'})
+        planned_at_was_submitted = 'planned_at' in attrs
+        expires_at_was_submitted = 'expires_at' in attrs
+        planned_at = attrs.get(
+            'planned_at',
+            getattr(self.instance, 'planned_at', None),
+        )
+        expires_at = attrs.get(
+            'expires_at',
+            getattr(self.instance, 'expires_at', None),
+        )
+        now = timezone.now()
+        if (
+            planned_at_was_submitted
+            and planned_at is not None
+            and planned_at <= now
+        ):
+            raise serializers.ValidationError({
+                'planned_at': 'Ngày dự định phải ở trong tương lai.',
+            })
+        if (
+            (planned_at_was_submitted or expires_at_was_submitted)
+            and planned_at is not None
+            and expires_at is not None
+            and expires_at <= planned_at
+        ):
+            raise serializers.ValidationError({
+                'expires_at': 'Yêu cầu cần còn hiệu lực sau ngày dự định.',
+            })
         return attrs
 
 
 def request_payload(item):
-    return {
+    payload = {
         'id': item.id,
         'user_id': item.user_id,
         'request_type': item.request_type,
@@ -116,10 +162,63 @@ def request_payload(item):
         'currency': item.currency,
         'condition_preference': item.condition_preference,
         'status': item.status,
+        'planned_at': item.planned_at,
         'expires_at': item.expires_at,
+        'same_intent_count': getattr(item, 'same_intent_count', 0),
         'created_at': item.created_at,
         'updated_at': item.updated_at,
     }
+    if hasattr(item, 'my_interest'):
+        payload['my_interest'] = item.my_interest
+    return payload
+
+
+def annotate_same_intent_count(queryset, now=None, user_id=None):
+    now = now or timezone.now()
+    same_book = (
+        Q(book_work_id=OuterRef('book_work_id'), book_work_id__isnull=False)
+        | Q(
+            book_work__isnull=True,
+            title_keyword__isnull=False,
+            title_keyword__iexact=OuterRef('title_keyword'),
+        )
+        | Q(
+            book_work__isnull=True,
+            title_keyword__isnull=False,
+            title_keyword__iexact=OuterRef('book_work__title'),
+        )
+        | Q(
+            book_work_id__isnull=False,
+            title_keyword__isnull=False,
+            book_work__title__iexact=OuterRef('title_keyword'),
+        )
+    )
+    count_query = (
+        BookRequest.objects.filter(
+            request_type=OuterRef('request_type'),
+            status='OPEN',
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .filter(same_book)
+        .values('request_type')
+        .annotate(total=Count('user_id', distinct=True))
+        .values('total')[:1]
+    )
+    queryset = queryset.annotate(
+        same_intent_count=Coalesce(
+            Subquery(count_query, output_field=IntegerField()),
+            Value(0),
+        ),
+    )
+    if user_id is not None:
+        queryset = queryset.annotate(
+            my_interest=Exists(RequestInterest.objects.filter(
+                request_id=OuterRef('pk'),
+                user_id=user_id,
+                status='ACTIVE',
+            )),
+        )
+    return queryset
 
 
 def intent_summary(book, user=None):
@@ -228,22 +327,48 @@ class BookIntentSummaryView(APIView):
 
 class BookRequestListCreateView(APIView):
     def get_permissions(self):
-        permission = IsAuthenticated if self.request.method == 'POST' else AllowAny
+        is_private_list = (
+            self.request.method == 'GET'
+            and self.request.query_params.get('scope') == 'mine'
+        )
+        permission = (
+            IsAuthenticated
+            if self.request.method == 'POST' or is_private_list
+            else AllowAny
+        )
         return [permission()]
 
     def get(self, request):
         now = timezone.now()
-        queryset = BookRequest.objects.filter(
-            status='OPEN',
-        ).filter(
-            Q(expires_at__isnull=True) | Q(expires_at__gt=now),
-        ).filter(
-            Q(category__isnull=True)
-            | Q(
-                category__status='ACTIVE',
-                category__slug__in=BOOK_CATEGORY_SLUGS,
-            ),
-        ).order_by('-created_at', '-id')
+        if request.query_params.get('scope') == 'mine':
+            queryset = BookRequest.objects.filter(user_id=request.user.id)
+        else:
+            queryset = BookRequest.objects.filter(status='OPEN').filter(
+                Q(expires_at__isnull=True) | Q(expires_at__gt=now),
+            ).filter(
+                Q(category__isnull=True)
+                | Q(
+                    category__status='ACTIVE',
+                    category__slug__in=BOOK_CATEGORY_SLUGS,
+                ),
+            )
+            if request.user.is_authenticated:
+                queryset = queryset.exclude(user_id=request.user.id)
+            request_type = request.query_params.get('request_type')
+            if request_type:
+                if request_type not in ('BUY', 'BORROW', 'SELL_INTENT'):
+                    raise serializers.ValidationError({
+                        'request_type': 'Loại yêu cầu không hợp lệ.',
+                    })
+                queryset = queryset.filter(request_type=request_type)
+        queryset = annotate_same_intent_count(
+            queryset,
+            now,
+            request.user.id if request.user.is_authenticated else None,
+        ).order_by(
+            '-created_at',
+            '-id',
+        )
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         return paginator.get_paginated_response([
@@ -269,7 +394,7 @@ class BookRequestListCreateView(APIView):
             for key in (
                 'book_work', 'category', 'title_keyword', 'description',
                 'budget_max', 'asking_price', 'condition_preference',
-                'expires_at',
+                'planned_at', 'expires_at',
             )
             if key in data
         }
@@ -378,18 +503,23 @@ class BookRequestInterestView(APIView):
             for item in page
         ])
 
+    @transaction.atomic
     def post(self, request, request_id):
         book_request = get_object_or_404(
-            BookRequest,
+            BookRequest.objects.select_for_update(),
             pk=request_id,
             status='OPEN',
         )
+        now = timezone.now()
+        if book_request.expires_at is not None and book_request.expires_at <= now:
+            raise serializers.ValidationError('Yêu cầu này đã hết hạn.')
         if book_request.user_id == request.user.id:
             raise serializers.ValidationError('Không thể quan tâm yêu cầu của chính bạn.')
         note = serializers.CharField(
             required=False,
             allow_blank=True,
             allow_null=True,
+            max_length=1500,
         ).run_validation(request.data.get('note'))
         interest, created = RequestInterest.objects.get_or_create(
             request=book_request,
@@ -397,15 +527,62 @@ class BookRequestInterestView(APIView):
             defaults={
                 'note': note,
                 'status': 'ACTIVE',
-                'created_at': timezone.now(),
+                'created_at': now,
             },
         )
-        if not created and interest.status != 'ACTIVE':
+        was_active = not created and interest.status == 'ACTIVE'
+        if not created and not was_active:
             interest.note = note
             interest.status = 'ACTIVE'
             interest.save(update_fields=['note', 'status'])
+        elif not created and interest.note != note:
+            interest.note = note
+            interest.save(update_fields=['note'])
+
+        conversation, conversation_created = get_or_create_private_conversation(
+            request.user.id,
+            book_request.user_id,
+        )
+        should_send_contact = created or not was_active or conversation_created
+        if should_send_contact:
+            title = (
+                book_request.book_work.title
+                if book_request.book_work_id
+                else book_request.title_keyword
+                or 'yêu cầu sách'
+            )
+            intent = {
+                'BUY': 'có thông tin sách phù hợp',
+                'BORROW': 'có thể cho mượn sách phù hợp',
+                'SELL_INTENT': 'quan tâm muốn mua sách bạn đăng',
+            }[book_request.request_type]
+            intro = f'Mình {intent} với yêu cầu “{title}”.'
+            content = f'{intro}\n{note.strip()}' if note and note.strip() else intro
+            Message.objects.create(
+                conversation=conversation,
+                sender=request.user,
+                message_type='TEXT',
+                content=content,
+                sent_at=now,
+            )
+            conversation.updated_at = now
+            conversation.save(update_fields=['updated_at'])
+            create_notification(
+                book_request.user_id,
+                notification_type='BOOK_REQUEST',
+                title='Có người phản hồi yêu cầu sách',
+                content=f'{request.user.full_name} {intent}. Mở tin nhắn để trao đổi.',
+                entity_type='CONVERSATION',
+                entity_id=conversation.id,
+                created_at=now,
+            )
         return Response(
-            {'id': interest.id, 'request_id': book_request.id, 'status': interest.status},
+            {
+                'id': interest.id,
+                'request_id': book_request.id,
+                'status': interest.status,
+                'conversation_id': conversation.id,
+            },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 

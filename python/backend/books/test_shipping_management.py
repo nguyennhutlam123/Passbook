@@ -21,6 +21,7 @@ from .shipment_services import (
     update_shipment_status,
     validate_shipment_transition,
 )
+from .services import calculate_borrow_late_fee, mark_overdue_borrow_orders
 
 
 class ShipmentStateMachineTests(SimpleTestCase):
@@ -244,8 +245,12 @@ class ShipmentStateMachineTests(SimpleTestCase):
         )
         borrow = SimpleNamespace(
             id=14,
-            status='CONFIRMED',
+            status='PENDING',
+            borrower_id=12,
+            lender_id=13,
             actual_start_at=None,
+            expected_start_at=now - timedelta(days=3),
+            expected_return_at=now + timedelta(days=3),
             updated_at=None,
             return_tracking_code=None,
             lend_listing=listing,
@@ -281,7 +286,9 @@ class ShipmentStateMachineTests(SimpleTestCase):
             payment_manager,
         ), patch(
             'books.shipment_services.notify_order_status_changed',
-        ) as notify:
+        ), patch(
+            'books.shipment_services.notify_borrow_order_parties',
+        ) as notify_borrow:
             event, old_status = update_shipment_status.__wrapped__(
                 shipment,
                 status='DELIVERED',
@@ -299,7 +306,12 @@ class ShipmentStateMachineTests(SimpleTestCase):
         self.assertEqual(order.status, 'PROCESSING')
         self.assertEqual(payment.status, 'PAID')
         borrow.save.assert_called_once_with(
-            update_fields=['status', 'actual_start_at', 'updated_at'],
+            update_fields=[
+                'status',
+                'actual_start_at',
+                'expected_return_at',
+                'updated_at',
+            ],
         )
         listing.save.assert_called_once_with(update_fields=['status', 'updated_at'])
         book.save.assert_called_once_with(update_fields=['status', 'updated_at'])
@@ -307,7 +319,108 @@ class ShipmentStateMachineTests(SimpleTestCase):
         payment.save.assert_called_once_with(
             update_fields=['status', 'paid_at', 'updated_at'],
         )
-        notify.assert_called_once_with(order, 'CONFIRMED')
+        notify_borrow.assert_called_once_with(
+            borrow,
+            title='Sách đã giao · Phiếu mượn đang hoạt động',
+            content=(
+                f'Admin đã xác nhận giao sách và thu COD cho phiếu #{borrow.id}. '
+                'Phiếu mượn đã bắt đầu; bạn có thể xem thời hạn trả trong chi tiết phiếu.'
+            ),
+        )
+
+    def test_admin_return_delivery_completes_borrow_and_charges_full_late_days(self):
+        now = timezone.now()
+        book = SimpleNamespace(status='ON_LOAN', updated_at=None, save=Mock())
+        listing = SimpleNamespace(
+            status='ON_LOAN',
+            expires_at=None,
+            updated_at=None,
+            book=book,
+            save=Mock(),
+        )
+        order = SimpleNamespace(
+            id=9,
+            order_type='BORROW',
+            status='PROCESSING',
+            completed_at=None,
+            updated_at=None,
+            save=Mock(),
+        )
+        borrow = SimpleNamespace(
+            id=14,
+            order_id=order.id,
+            order=order,
+            borrower_id=12,
+            lender_id=13,
+            status='RETURN_REQUESTED',
+            return_status='SHIPPING',
+            return_tracking_code='RET-123',
+            expected_return_at=now - timedelta(hours=49),
+            actual_return_at=None,
+            return_approved_at=None,
+            late_fee_amount=Decimal('0'),
+            borrow_terms_snapshot={'late_fee_per_day': '1500.0000'},
+            updated_at=None,
+            lend_listing=listing,
+            save=Mock(),
+        )
+        shipment = SimpleNamespace(
+            id=23,
+            order_id=order.id,
+            order=order,
+            tracking_code='RET-123',
+            status='IN_TRANSIT',
+            shipped_at=now - timedelta(hours=1),
+            delivered_at=None,
+            updated_at=None,
+            save=Mock(),
+            tracking_events=Mock(),
+        )
+        shipment.tracking_events.order_by.return_value.first.return_value = None
+        event_model = Mock()
+        event_model.objects.create.return_value = SimpleNamespace(id=84)
+
+        with patch(
+            'books.shipment_services.timezone.now',
+            return_value=now,
+        ), patch(
+            'books.shipment_services.notify_borrow_order_parties',
+        ) as notify_borrow:
+            event, _old_status = update_shipment_status.__wrapped__(
+                shipment,
+                status='DELIVERED',
+                source='ADMIN',
+                borrow=borrow,
+                event_model=event_model,
+            )
+
+        self.assertEqual(event.id, 84)
+        self.assertEqual(borrow.status, 'COMPLETED')
+        self.assertEqual(borrow.return_status, 'COMPLETED')
+        self.assertEqual(borrow.actual_return_at, now)
+        self.assertEqual(borrow.late_fee_amount, Decimal('3000.0000'))
+        self.assertEqual(order.status, 'COMPLETED')
+        self.assertEqual(listing.status, 'ACTIVE')
+        self.assertEqual(book.status, 'AVAILABLE')
+        notify_borrow.assert_called_once_with(
+            borrow,
+            title='Đã nhận lại sách · Phiếu mượn hoàn tất',
+            content=(
+                f'Admin đã xác nhận nhận lại sách của phiếu #{borrow.id}. '
+                'Phiếu mượn đã hoàn tất.'
+            ),
+        )
+        self.assertEqual(
+            borrow.save.call_args.kwargs['update_fields'],
+            [
+                'status',
+                'return_status',
+                'actual_return_at',
+                'return_approved_at',
+                'late_fee_amount',
+                'updated_at',
+            ],
+        )
 
     def test_cod_delivery_pays_payment_when_order_is_completed(self):
         now = Mock(name='now')
@@ -539,6 +652,48 @@ class AdminShipmentPermissionTests(SimpleTestCase):
         self.assertEqual(response.data['status'], 'PICKED_UP')
         self.assertEqual(response.data['source'], 'ADMIN')
 
+    def test_borrow_shipment_payload_includes_late_fee_summary(self):
+        now = timezone.now()
+        lender = SimpleNamespace(id=11, full_name='Lender', email='lender@example.test')
+        borrower = SimpleNamespace(id=12, full_name='Borrower', email='borrower@example.test')
+        borrow = SimpleNamespace(
+            id=18,
+            return_tracking_code=None,
+            lender=lender,
+            borrower=borrower,
+            status='CONFIRMED',
+            expected_return_at=now + timedelta(days=7),
+            borrow_terms_snapshot={'late_fee_per_day': '2500'},
+            late_fee_amount=Decimal('0'),
+            actual_return_at=None,
+        )
+        order = SimpleNamespace(
+            id=7,
+            order_code='ORDER-7',
+            order_type='BORROW',
+            status='CONFIRMED',
+            borrow_order=borrow,
+        )
+        shipment = SimpleNamespace(
+            id=3,
+            order=order,
+            tracking_code='TRACK-3',
+            carrier='Local delivery',
+            status='PENDING',
+            shipped_at=None,
+            delivered_at=None,
+            created_at=now,
+            updated_at=now,
+            tracking_events=SimpleNamespace(all=lambda: []),
+        )
+
+        payload = AdminShipmentListView.payload(shipment)
+
+        self.assertEqual(payload['type'], 'BORROW')
+        self.assertEqual(payload['borrow']['id'], borrow.id)
+        self.assertEqual(payload['borrow']['late_fee_per_day'], '2500')
+        self.assertEqual(payload['borrow']['late_fee_estimate'], '0')
+
     def test_missing_shipment_is_not_found(self):
         request = self.factory.patch(
             '/api/admin/dashboard/shipping/shipments/999/status/',
@@ -598,6 +753,7 @@ class AdminShipmentPermissionTests(SimpleTestCase):
 
         create_event.assert_not_called()
 
+
     def test_borrow_tracking_status_is_reserved_for_admin_shipping_api(self):
         borrower = SimpleNamespace(id=88, is_authenticated=True, role='STUDENT')
         order = SimpleNamespace(order_type='BORROW', seller_id=96)
@@ -641,3 +797,65 @@ class AdminShipmentPermissionTests(SimpleTestCase):
                 )
 
         create_event.assert_not_called()
+
+
+class OverdueBorrowOrderTests(SimpleTestCase):
+    def test_late_fee_counts_only_full_24_hour_periods(self):
+        due_at = timezone.now()
+        borrow = SimpleNamespace(
+            expected_return_at=due_at,
+            borrow_terms_snapshot={'late_fee_per_day': '2500.0000'},
+        )
+
+        before_full_day = calculate_borrow_late_fee(
+            borrow,
+            at=due_at + timedelta(hours=23, minutes=59),
+        )
+        after_full_day = calculate_borrow_late_fee(
+            borrow,
+            at=due_at + timedelta(hours=24),
+        )
+        after_two_full_days = calculate_borrow_late_fee(
+            borrow,
+            at=due_at + timedelta(hours=49),
+        )
+
+        self.assertEqual(before_full_day['late_days'], 0)
+        self.assertEqual(before_full_day['late_fee_amount'], Decimal('0'))
+        self.assertEqual(after_full_day['late_days'], 1)
+        self.assertEqual(after_full_day['late_fee_amount'], Decimal('2500.0000'))
+        self.assertEqual(after_two_full_days['late_days'], 2)
+        self.assertEqual(after_two_full_days['late_fee_amount'], Decimal('5000.0000'))
+
+    def test_overdue_sweep_updates_active_order_once_and_notifies_both_parties(self):
+        now = timezone.now()
+        borrow = SimpleNamespace(
+            id=22,
+            status='ACTIVE',
+            updated_at=None,
+            borrower_id=12,
+            lender_id=13,
+            save=Mock(),
+        )
+        queryset = Mock()
+        queryset.filter.return_value.order_by.return_value = [borrow]
+        manager = Mock()
+        manager.select_for_update.return_value.select_related.return_value = queryset
+
+        with patch('books.services.BorrowOrder.objects', manager), patch(
+            'books.services.notify_borrow_order_parties',
+        ) as notify:
+            count = mark_overdue_borrow_orders.__wrapped__(now=now)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(borrow.status, 'OVERDUE')
+        borrow.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+        notify.assert_called_once_with(
+            borrow,
+            title='Phiếu mượn đã quá hạn',
+            content=(
+                f'Phiếu mượn #{borrow.id} đã quá hạn. '
+                'Phí trễ được tính theo số ngày 24 giờ hoàn tất và Admin sẽ xác nhận khi nhận sách trả.'
+            ),
+            created_at=now,
+        )

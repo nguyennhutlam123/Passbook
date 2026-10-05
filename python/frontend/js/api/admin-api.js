@@ -61,6 +61,16 @@
                 `/admin/dashboard/shipping/shipments/${path(shipmentId)}/status/`,
                 data,
             ),
+        listingsForModeration: (listingType, query = {}) =>
+            client.get(global.PassbookApiUtils.withQuery(
+                `/admin/dashboard/listings/${path(listingType)}/`,
+                query,
+            )),
+        moderateListing: (listingType, listingId, data) =>
+            client.patch(
+                `/admin/dashboard/listings/${path(listingType)}/${path(listingId)}/moderation/`,
+                data,
+            ),
         users: (query = {}) =>
             client.get(global.PassbookApiUtils.withQuery("/admin/users/", query)),
         reports: (query = {}) =>

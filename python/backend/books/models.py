@@ -352,6 +352,7 @@ class BookRequest(models.Model):
     currency = models.CharField(max_length=3, null=True, blank=True)
     condition_preference = models.CharField(max_length=30, null=True, blank=True)
     status = models.CharField(max_length=20, default='OPEN')
+    planned_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()

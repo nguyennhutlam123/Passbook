@@ -1,5 +1,6 @@
 """Create a repeatable, additive dataset for local/demo environments."""
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.hashers import make_password
@@ -300,7 +301,7 @@ class Command(BaseCommand):
                     ConversationMember(
                         conversation=conversation,
                         user=owner,
-                        joined_at=now,
+                        joined_at=now + timedelta(milliseconds=1),
                     ),
                 ])
             result.append(conversation)

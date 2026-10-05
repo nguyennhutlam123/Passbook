@@ -9,6 +9,12 @@ class ConversationUserSerializer(serializers.Serializer):
     name = serializers.CharField(source='full_name')
 
 
+class ConversationPreviewMessageSerializer(serializers.Serializer):
+    sender_id = serializers.IntegerField()
+    content = serializers.CharField()
+    created_at = serializers.DateTimeField(source='sent_at')
+
+
 class ConversationBookSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     title = serializers.CharField()
@@ -31,10 +37,21 @@ class ConversationSerializer(serializers.ModelSerializer):
     book = serializers.SerializerMethodField()
     buyer = serializers.SerializerMethodField()
     seller = serializers.SerializerMethodField()
+    other_user = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
-        fields = ('id', 'book', 'buyer', 'seller', 'created_at', 'updated_at')
+        fields = (
+            'id',
+            'book',
+            'buyer',
+            'seller',
+            'other_user',
+            'last_message',
+            'created_at',
+            'updated_at',
+        )
 
     @staticmethod
     def _members(conversation):
@@ -61,6 +78,32 @@ class ConversationSerializer(serializers.ModelSerializer):
     def get_seller(self, conversation):
         members = self._members(conversation)
         return ConversationUserSerializer(members[1].user).data if len(members) > 1 else None
+
+    def get_other_user(self, conversation):
+        request = self.context.get('request')
+        if request is None:
+            return None
+        other_member = next(
+            (
+                member for member in self._members(conversation)
+                if member.user_id != request.user.id
+            ),
+            None,
+        )
+        return (
+            ConversationUserSerializer(other_member.user).data
+            if other_member is not None
+            else None
+        )
+
+    @staticmethod
+    def get_last_message(conversation):
+        messages = getattr(conversation, 'latest_messages', ())
+        return (
+            ConversationPreviewMessageSerializer(messages[0]).data
+            if messages
+            else None
+        )
 
 
 class MessageSerializer(serializers.ModelSerializer):

@@ -80,6 +80,8 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
 - Schema Lite gồm 41 bảng nghiệp vụ (ngoài các bảng Django framework).
 - Không sử dụng các bảng Django `auth_user` hoặc `authtoken_token`.
 - Các model nghiệp vụ là unmanaged; không chạy migrations để tạo hoặc thay đổi schema hiện tại.
+- Schema hiện hữu cần áp dụng một lần `../docs/database/passbook_v1.2_lite_request_planned_at_upgrade.sql`
+  để lưu ngày dự định mua/mượn/bán trên yêu cầu sách; không nhầm trường này với ngày hết hạn.
 - Không đổi sang `passbook_db`, không reset/drop hoặc merge dữ liệu giữa hai database.
 
 ## API overview
@@ -96,10 +98,14 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
   return/refund.
 - **Borrow:** tin cho mượn mới ở trạng thái `PENDING` và chỉ công khai sau khi Admin duyệt.
   Người mượn thêm tin đang hoạt động vào cart, chọn ngày bắt đầu/ngày trả và checkout để tạo
-  `Order` cùng `BorrowOrder`. Checkout BORROW-only dùng COD khi Admin giao; backend khóa
-  listing và Book, tự tạo Shipment và đặt phiếu ở trạng thái đã xác nhận. Admin cập nhật
-  vận chuyển; khi giao thành công phiếu chuyển sang `ACTIVE`, sách chuyển `ON_LOAN` và COD
-  được ghi nhận đã thu. Các bước trả và hoàn tất tiếp tục dùng lifecycle của `BorrowOrder`.
+  `Order` cùng `BorrowOrder`. Phiếu mượn dùng COD khi giao; backend khóa listing và Book, tự
+  tạo Shipment và giữ phiếu ở `PENDING`. Chỉ khi Admin cập nhật giao thành công (xác nhận đã
+  thu COD), phiếu mới chuyển sang `ACTIVE` và sách sang `ON_LOAN`. Người mượn gửi yêu cầu trả,
+  tạo Shipment chiều về; Admin quản lý vận chuyển. Khi Admin xác nhận đã nhận sách, phiếu/Order
+  hoàn tất, sách được mở bán/cho mượn lại và phí trễ được chốt theo số chu kỳ 24 giờ hoàn tất.
+  Phiếu quá hạn được chuyển sang `OVERDUE` khi danh sách phiếu được truy cập và bằng command
+  `python manage.py mark_overdue_borrow_orders`; production nên chạy command định kỳ (ví dụ mỗi
+  giờ). Phí trễ ước tính theo mức/ngày trong snapshot và được chốt khi Admin xác nhận trả sách.
   Reservation cũ không còn dùng để tạo yêu cầu mượn mới.
 - **Requests:** dự định mua/bán, book requests, matching và interests.
 - **Favorites:** thêm, xóa và danh sách sách yêu thích.
@@ -118,8 +124,12 @@ chuyển hiện là 0 vì Lite schema/project chưa có quy tắc tính phí gia
 
 BUY và BORROW là hai listing model riêng đã có trong Lite schema; không thêm cột hay migration.
 Tin BUY và BORROW đều cần Admin duyệt trước khi xuất hiện công khai. BORROW listing không xuất
-hiện trong trang Mua; sau checkout, Admin tiếp nhận và điều phối giao sách, không yêu cầu người
-cho mượn xác nhận/chuẩn bị phiếu.
+hiện trong trang Mua; sau checkout, Admin tiếp nhận và điều phối cả lượt giao lẫn lượt trả sách.
+
+Admin duyệt hoặc từ chối tin BUY và BORROW trong `Admin Dashboard > Kiểm duyệt tin`; hai loại
+tin có danh sách riêng và chỉ listing `PENDING` mới có thể được xử lý. Khi người đăng sửa một tin
+đang công khai, tin trở lại `PENDING` và cần Admin duyệt lại trước khi xuất hiện công khai. Tiền
+đặt cọc của tin BORROW là tùy chọn, không có cờ bắt buộc đặt cọc.
 
 ## Demo data
 

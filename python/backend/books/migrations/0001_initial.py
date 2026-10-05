@@ -88,6 +88,7 @@ class Migration(migrations.Migration):
                 ('currency', models.CharField(blank=True, max_length=3, null=True)),
                 ('condition_preference', models.CharField(blank=True, max_length=30, null=True)),
                 ('status', models.CharField(default='OPEN', max_length=20)),
+                ('planned_at', models.DateTimeField(blank=True, null=True)),
                 ('expires_at', models.DateTimeField(blank=True, null=True)),
                 ('created_at', models.DateTimeField()),
                 ('updated_at', models.DateTimeField()),

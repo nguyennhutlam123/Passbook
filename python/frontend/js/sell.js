@@ -105,24 +105,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     BooksAPI.options().then((options) => {
         populateOptions(
-            form.elements.subject_id,
-            "Chọn môn học",
-            options.subjects,
-            (subject) => `${subject.name} (${subject.code})`,
-        );
-        populateOptions(
             form.elements.category_id,
             "Chọn danh mục",
             options.categories,
             (category) => category.name,
         );
         if (editing) {
-            form.elements.subject_id.value = String(editing.subject?.id || "");
+            form.elements.subject_name.value = editing.subject?.name || "";
             form.elements.category_id.value = String(editing.category?.id || "");
         }
     }).catch((error) => {
-        setError("subject_id", "Không thể tải danh sách môn học. Vui lòng tải lại trang.");
-        showToast(`Không thể tải dữ liệu danh mục: ${error.message}`);
+        setError("category_id", "Không thể tải danh mục sách. Vui lòng tải lại trang.");
+        showToast(`Không thể tải danh mục sách: ${error.message}`);
     });
 
     if (editing) {
@@ -141,7 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
             isbn: editing.isbn,
             condition_description: editing.condition_description,
             publication_year: editing.publication_year,
-            subject_id: editing.subject?.id,
+            subject_name: editing.subject?.name,
             category_id: editing.category?.id,
         }).forEach(([name, value]) => {
             if (value !== undefined && value !== null && form.elements[name]) {
@@ -248,13 +242,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const data = new FormData(form);
         [
-            "title", "subject_id", "price", "rental_fee", "max_days",
+            "title", "subject_name", "price", "rental_fee", "max_days",
             "shipping_paid_by", "return_method", "condition", "description",
         ].forEach((field) => setError(field));
         const errors = {};
         const selectedType = transactionType();
         if (!data.get("title")?.toString().trim()) errors.title = "Tên sách không được để trống.";
-        if (!Number(data.get("subject_id"))) errors.subject_id = "Vui lòng chọn môn học.";
+        if (!data.get("subject_name")?.toString().trim()) errors.subject_name = "Vui lòng nhập môn học.";
         if (selectedType === "BUY" && (!Number(data.get("price")) || Number(data.get("price")) <= 0)) {
             errors.price = "Giá bán phải lớn hơn 0.";
         }
@@ -290,7 +284,7 @@ document.addEventListener("DOMContentLoaded", () => {
             isbn: data.get("isbn")?.toString().trim() || null,
             condition_description: data.get("condition_description")?.toString().trim() || null,
             publication_year: data.get("publication_year") ? Number(data.get("publication_year")) : null,
-            subject_id: Number(data.get("subject_id")),
+            subject_name: data.get("subject_name").toString().trim(),
             category_id: data.get("category_id") ? Number(data.get("category_id")) : null,
         };
         if (selectedType === "BUY") {
@@ -304,7 +298,6 @@ document.addEventListener("DOMContentLoaded", () => {
             payload.late_fee_per_day = data.get("late_fee_per_day")
                 ? data.get("late_fee_per_day")
                 : null;
-            payload.deposit_required = Boolean(data.get("deposit_required"));
             payload.shipping_paid_by = data.get("shipping_paid_by");
             payload.return_method = data.get("return_method");
             payload.terms_notes = data.get("terms_notes") || "";
@@ -355,12 +348,8 @@ document.addEventListener("DOMContentLoaded", () => {
             localStorage.removeItem("editingListing");
             const detailLink = document.querySelector("[data-sell-detail-link]");
             if (detailLink) {
-                detailLink.href = editing
-                    ? book.listing_type === "BORROW"
-                        ? `book-detail.html?id=${book.id}&listing_type=borrow&listing_id=${book.listing_id}`
-                        : `book-detail.html?id=${book.id}`
-                    : "profile.html";
-                detailLink.textContent = editing ? "Xem chi tiết tin đăng" : "Về hồ sơ";
+                detailLink.href = "profile.html";
+                detailLink.textContent = "Về hồ sơ";
             }
             form.hidden = true;
             success.hidden = false;
@@ -368,16 +357,16 @@ document.addEventListener("DOMContentLoaded", () => {
             const successDescription = success.querySelector("[data-sell-success-description]");
             if (successTitle) {
                 successTitle.textContent = editing
-                    ? "Cập nhật tin đăng thành công"
+                    ? "Tin đăng đã gửi kiểm duyệt lại"
                     : "Tin đăng đã gửi kiểm duyệt";
             }
             if (successDescription) {
                 successDescription.textContent = editing
-                    ? "Tin đăng đã được cập nhật."
+                    ? "Tin đăng đã chuyển về trạng thái chờ duyệt sau khi cập nhật."
                     : "Sách sẽ hiển thị trên trang chính sau khi Admin phê duyệt.";
             }
             showToast(editing
-                ? "Đã cập nhật tin đăng."
+                ? "Tin đăng đã cập nhật và gửi Admin duyệt lại."
                 : "Tin đăng đã gửi kiểm duyệt và sẽ hiển thị sau khi Admin duyệt.");
         } catch (error) {
             const uploadedPublicIds = uploadedImages

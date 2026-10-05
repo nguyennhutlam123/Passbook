@@ -804,6 +804,22 @@ textarea:focus {
     margin-top: 2rem;
 }
 
+.detail-review-summary {
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+
+.book-card__rating {
+    color: #b45309;
+    font-weight: 700;
+    margin: 0.25rem 0;
+}
+
+.book-card__rating span {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
 .review-card {
     background: var(--surface-color);
     border: 1px solid var(--border-color);

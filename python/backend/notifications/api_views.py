@@ -16,7 +16,11 @@ class NotificationListView(APIView):
         queryset = Notification.objects.filter(user_id=request.user.id).order_by('-created_at', '-id')
         paginator = BookPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        return paginator.get_paginated_response(NotificationSerializer(page, many=True).data)
+        response = paginator.get_paginated_response(
+            NotificationSerializer(page, many=True).data,
+        )
+        response.data['unread_count'] = queryset.filter(is_read=False).count()
+        return response
 
 
 class NotificationReadView(APIView):

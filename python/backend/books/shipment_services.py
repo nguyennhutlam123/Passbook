@@ -4,9 +4,13 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from notifications.services import notify_order_status_changed
+from notifications.services import (
+    notify_borrow_order_parties,
+    notify_order_status_changed,
+)
 
 from .models import BorrowOrder, Payment, Shipment, ShipmentTracking
+from .services import calculate_borrow_late_fee
 
 
 SHIPMENT_TRANSITIONS = {
@@ -149,13 +153,63 @@ def update_shipment_status(
             order.save(update_fields=['status', 'updated_at'])
             notify_order_status_changed(order, previous_order_status)
 
+    if status == 'EXCEPTION' and is_borrow_order and borrow is not None:
+        return_shipment = is_return_shipment(shipment, borrow)
+        notify_borrow_order_parties(
+            borrow,
+            title='Vận chuyển sách gặp sự cố',
+            content=(
+                f'Đơn vận chuyển trả sách của phiếu #{borrow.id} gặp sự cố.'
+                if return_shipment
+                else f'Đơn giao sách của phiếu #{borrow.id} gặp sự cố.'
+            ) + ' Vui lòng theo dõi cập nhật tiếp theo từ Admin.',
+        )
+
     if status == 'DELIVERED' and is_return_shipment(shipment, borrow):
-        borrow.status = 'RETURNED'
-        borrow.return_status = 'DELIVERED'
+        if borrow.status != 'RETURN_REQUESTED':
+            raise ValidationError(
+                'Phiếu mượn chưa có yêu cầu trả đang được xử lý.',
+            )
+        late_fee = calculate_borrow_late_fee(borrow, at=occurred_at)
+        borrow.status = 'COMPLETED'
+        borrow.return_status = 'COMPLETED'
+        borrow.actual_return_at = occurred_at
+        borrow.return_approved_at = now
+        borrow.late_fee_amount = late_fee['late_fee_amount']
         borrow.updated_at = now
-        borrow.save(update_fields=['status', 'return_status', 'updated_at'])
+        borrow.save(update_fields=[
+            'status',
+            'return_status',
+            'actual_return_at',
+            'return_approved_at',
+            'late_fee_amount',
+            'updated_at',
+        ])
+        order.status = 'COMPLETED'
+        order.completed_at = now
+        order.updated_at = now
+        order.save(update_fields=['status', 'completed_at', 'updated_at'])
+        listing = borrow.lend_listing
+        listing.status = (
+            'EXPIRED'
+            if listing.expires_at is not None and listing.expires_at <= now
+            else 'ACTIVE'
+        )
+        listing.updated_at = now
+        listing.save(update_fields=['status', 'updated_at'])
+        listing.book.status = 'AVAILABLE'
+        listing.book.updated_at = now
+        listing.book.save(update_fields=['status', 'updated_at'])
+        notify_borrow_order_parties(
+            borrow,
+            title='Đã nhận lại sách · Phiếu mượn hoàn tất',
+            content=(
+                f'Admin đã xác nhận nhận lại sách của phiếu #{borrow.id}. '
+                'Phiếu mượn đã hoàn tất.'
+            ),
+        )
     elif status == 'DELIVERED' and is_borrow_order:
-        if borrow is None or borrow.status not in ('CONFIRMED', 'READY_FOR_PICKUP'):
+        if borrow is None or borrow.status not in ('PENDING', 'CONFIRMED', 'READY_FOR_PICKUP'):
             raise ValidationError(
                 'Phiếu mượn chưa ở trạng thái có thể giao.',
             )
@@ -163,10 +217,40 @@ def update_shipment_status(
             raise ValidationError(
                 f'Không thể giao BORROW Order ở trạng thái {order.status}.',
             )
-        borrow.status = 'ACTIVE'
+        payments = list(Payment.objects.select_for_update().filter(order_id=order.id))
+        cod_payment = next(
+            (
+                payment for payment in payments
+                if payment.payment_method == 'COD' and payment.status == 'PENDING'
+            ),
+            None,
+        )
+        if cod_payment is None:
+            raise ValidationError(
+                'Chưa xác nhận thu COD; không thể hoàn tất giao phiếu mượn.',
+            )
+        expected_duration = (
+            borrow.expected_return_at - borrow.expected_start_at
+            if borrow.expected_start_at is not None
+            and borrow.expected_return_at is not None
+            else None
+        )
+        if expected_duration is not None:
+            borrow.expected_return_at = occurred_at + expected_duration
+        borrow.status = (
+            'OVERDUE'
+            if borrow.expected_return_at is not None
+            and borrow.expected_return_at < occurred_at
+            else 'ACTIVE'
+        )
         borrow.actual_start_at = occurred_at
         borrow.updated_at = now
-        borrow.save(update_fields=['status', 'actual_start_at', 'updated_at'])
+        borrow.save(update_fields=[
+            'status',
+            'actual_start_at',
+            'expected_return_at',
+            'updated_at',
+        ])
         listing = borrow.lend_listing
         listing.status = 'ON_LOAN'
         listing.updated_at = now
@@ -174,18 +258,24 @@ def update_shipment_status(
         listing.book.status = 'ON_LOAN'
         listing.book.updated_at = now
         listing.book.save(update_fields=['status', 'updated_at'])
-        for payment in Payment.objects.select_for_update().filter(order_id=order.id):
-            if payment.payment_method == 'COD' and payment.status != 'PAID':
-                payment.status = 'PAID'
-                payment.paid_at = now
-                payment.updated_at = now
-                payment.save(update_fields=['status', 'paid_at', 'updated_at'])
+        cod_payment.status = 'PAID'
+        cod_payment.paid_at = now
+        cod_payment.updated_at = now
+        cod_payment.save(update_fields=['status', 'paid_at', 'updated_at'])
         if order.status == 'CONFIRMED':
             previous_order_status = order.status
             order.status = 'PROCESSING'
             order.updated_at = now
             order.save(update_fields=['status', 'updated_at'])
             notify_order_status_changed(order, previous_order_status)
+        notify_borrow_order_parties(
+            borrow,
+            title='Sách đã giao · Phiếu mượn đang hoạt động',
+            content=(
+                f'Admin đã xác nhận giao sách và thu COD cho phiếu #{borrow.id}. '
+                'Phiếu mượn đã bắt đầu; bạn có thể xem thời hạn trả trong chi tiết phiếu.'
+            ),
+        )
     elif status == 'DELIVERED':
         if order is not None and getattr(order, 'order_type', None) == 'SALE':
             if order.status not in ('CONFIRMED', 'PROCESSING'):

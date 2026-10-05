@@ -22,9 +22,10 @@ class NotificationAuthorizationTests(SimpleTestCase):
     def test_list_queryset_is_scoped_to_authenticated_user(self):
         queryset = Mock()
         queryset.order_by.return_value = queryset
+        queryset.filter.return_value.count.return_value = 3
         paginator = Mock()
         paginator.paginate_queryset.return_value = []
-        paginator.get_paginated_response.side_effect = lambda data: Response(data)
+        paginator.get_paginated_response.side_effect = lambda data: Response({'results': data})
         request = self.factory.get('/api/notifications/')
         force_authenticate(request, user=self.user)
 
@@ -39,8 +40,10 @@ class NotificationAuthorizationTests(SimpleTestCase):
             response = NotificationListView.as_view()(request)
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['unread_count'], 3)
         filter_notifications.assert_called_once_with(user_id=self.user.id)
         queryset.order_by.assert_called_once_with('-created_at', '-id')
+        queryset.filter.assert_called_once_with(is_read=False)
 
     def test_user_cannot_mark_another_users_notification_read(self):
         request = self.factory.patch('/api/notifications/41/read/')
@@ -94,6 +97,28 @@ class NotificationAuthorizationTests(SimpleTestCase):
 
 
 class OrderNotificationTests(SimpleTestCase):
+    def test_borrow_notification_is_created_once_for_each_party(self):
+        from notifications.services import notify_borrow_order_parties
+
+        borrow = SimpleNamespace(id=31, borrower_id=7, lender_id=8)
+        with patch('notifications.services.Notification.objects.create') as create:
+            notify_borrow_order_parties(
+                borrow,
+                title='Sách đã giao',
+                content='Phiếu đang hoạt động.',
+            )
+
+        self.assertEqual(
+            [call.kwargs['user_id'] for call in create.call_args_list],
+            [7, 8],
+        )
+        for call in create.call_args_list:
+            self.assertEqual(call.kwargs['notification_type'], 'BORROW_ORDER')
+            self.assertEqual(call.kwargs['entity_type'], 'BORROW_ORDER')
+            self.assertEqual(call.kwargs['entity_id'], 31)
+            self.assertFalse(call.kwargs['is_read'])
+            self.assertIsNotNone(call.kwargs['created_at'])
+
     @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
     def test_order_notification_is_created_for_each_party_and_emails_after_commit(self):
         from notifications.services import notify_order_parties

@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Prefetch, Subquery
+from django.db.models import Count, Exists, OuterRef, Prefetch, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -15,6 +15,7 @@ from books.pagination import BookPagination
 from books.models import Book
 from .models import Conversation, ConversationMember, Message
 from .serializers import ConversationSerializer, MessageSerializer
+from users.models import User
 
 
 def conversation_queryset():
@@ -26,7 +27,9 @@ def conversation_queryset():
         ),
         Prefetch(
             'messages',
-            queryset=Message.objects.order_by('-sent_at', '-id')[:1],
+            queryset=Message.objects.filter(
+                deleted_at__isnull=True,
+            ).order_by('-sent_at', '-id')[:1],
             to_attr='latest_messages',
         ),
     )
@@ -61,18 +64,33 @@ class ConversationCreateView(APIView):
             )
 
         now = timezone.now()
-        participant_ids = (request.user.id, book.owner_id)
-        candidate_ids = ConversationMember.objects.filter(
-            user_id=participant_ids[0],
-        ).values('conversation_id')
-        existing = (
-            Conversation.objects
-            .filter(conversation_type='SALE', id__in=candidate_ids)
-            .filter(members__user_id=participant_ids[1])
-            .order_by('-updated_at', '-id')
-            .first()
-        )
+        participant_ids = sorted({request.user.id, book.owner_id})
         with transaction.atomic():
+            list(
+                User.objects.select_for_update()
+                .filter(pk__in=participant_ids)
+                .order_by('pk')
+                .values_list('pk', flat=True)
+            )
+            candidate_ids = ConversationMember.objects.filter(
+                user_id=request.user.id,
+            ).values('conversation_id')
+            participant_count = (
+                ConversationMember.objects
+                .filter(conversation_id=OuterRef('pk'))
+                .values('conversation_id')
+                .annotate(total=Count('user_id'))
+                .values('total')
+            )
+            existing = (
+                Conversation.objects
+                .filter(conversation_type='SALE', id__in=candidate_ids)
+                .annotate(member_count=Subquery(participant_count))
+                .filter(members__user_id=book.owner_id, member_count=2)
+                .order_by('-updated_at', '-id')
+                .first()
+            )
+            created = existing is None
             if existing is None:
                 conversation = Conversation.objects.create(
                     conversation_type='SALE',
@@ -88,7 +106,7 @@ class ConversationCreateView(APIView):
                     ConversationMember(
                         conversation=conversation,
                         user_id=book.owner_id,
-                        joined_at=now + timedelta(microseconds=1),
+                        joined_at=now + timedelta(milliseconds=1),
                     ),
                 ])
             else:
@@ -96,8 +114,15 @@ class ConversationCreateView(APIView):
         conversation = conversation_queryset().get(pk=conversation.pk)
         conversation.book_context = book
         return Response(
-            ConversationSerializer(conversation).data,
-            status=status.HTTP_201_CREATED,
+            ConversationSerializer(
+                conversation,
+                context={'request': request},
+            ).data,
+            status=(
+                status.HTTP_201_CREATED
+                if created
+                else status.HTTP_200_OK
+            ),
         )
 
 
@@ -117,7 +142,11 @@ class ConversationListView(APIView):
         paginator = BookPagination()
         page = paginator.paginate_queryset(conversations, request, view=self)
         return paginator.get_paginated_response(
-            ConversationSerializer(page, many=True).data,
+            ConversationSerializer(
+                page,
+                many=True,
+                context={'request': request},
+            ).data,
         )
 
 
@@ -126,7 +155,10 @@ class ConversationDetailView(APIView):
 
     def get(self, request, conversation_id):
         conversation = accessible_conversation(request, conversation_id)
-        return Response(ConversationSerializer(conversation).data)
+        return Response(ConversationSerializer(
+            conversation,
+            context={'request': request},
+        ).data)
 
 
 class MessageListView(APIView):
@@ -142,12 +174,15 @@ class MessageListView(APIView):
             conversation=conversation,
             user=request.user,
         ).update(last_read_at=now)
-        member_last_read_at = ConversationMember.objects.filter(
+        recipient_last_read_at = ConversationMember.objects.filter(
             conversation_id=conversation.id,
-            user_id=request.user.id,
+        ).exclude(
+            user_id=OuterRef('sender_id'),
         ).values('last_read_at')[:1]
-        messages = conversation.messages.select_related('sender').annotate(
-            reader_last_read_at=Subquery(member_last_read_at),
+        messages = conversation.messages.filter(
+            deleted_at__isnull=True,
+        ).select_related('sender').annotate(
+            reader_last_read_at=Subquery(recipient_last_read_at),
         ).order_by('sent_at', 'id')
         paginator = BookPagination()
         page = paginator.paginate_queryset(messages, request, view=self)

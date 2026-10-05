@@ -6,10 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404
 from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import ValidationError as RestFrameworkValidationError
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -22,7 +24,9 @@ from .admin_api_views import (
 )
 from .api_views import (
     ActiveUserTokenRefreshSerializer,
+    ChangePasswordView,
     LogoutView,
+    ProfileView,
     UserAddressDetailView,
     UserAddressListCreateView,
 )
@@ -466,6 +470,30 @@ class OtpApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 401)
         issue.assert_not_called()
 
+    def test_contact_change_rejects_current_email_without_sending_otp(self):
+        from .otp_api_views import ChangeContactRequestView
+
+        user = SimpleNamespace(
+            id=71,
+            pk=71,
+            is_authenticated=True,
+            email='student@example.com',
+            phone=None,
+        )
+        request = self.factory.post(
+            '/api/auth/change-email/request/',
+            {'email': 'STUDENT@example.com'},
+            format='json',
+        )
+        force_authenticate(request, user=user)
+
+        with patch('users.otp_api_views.issue_otp') as issue:
+            response = ChangeContactRequestView.as_view()(request, channel='email')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('email', response.data)
+        issue.assert_not_called()
+
     def test_register_verification_activates_pending_user_without_returning_code(self):
         verification = SimpleNamespace(user_id=42)
         user = SimpleNamespace(
@@ -795,5 +823,159 @@ class UserAddressAuthorizationTests(SimpleTestCase):
 
         self.assertEqual(get_response.status_code, 401)
         self.assertEqual(post_response.status_code, 401)
+
+
+class ProfileAccountApiTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = SimpleNamespace(
+            id=42,
+            is_authenticated=True,
+            password_hash='current-hash',
+            email='student@example.com',
+            full_name='Student Name',
+            avatar_url=None,
+            phone=None,
+            university=None,
+            role='STUDENT',
+            status='ACTIVE',
+            is_verified=True,
+            created_at=timezone.now(),
+            save=Mock(),
+        )
+
+    def test_profile_fields_are_read_only_except_name_and_avatar(self):
+        request = self.factory.patch(
+            '/api/auth/profile/',
+            {
+                'name': 'Updated Name',
+                'email': 'attacker@example.com',
+                'phone': '+15550000000',
+                'role': 'ADMIN',
+                'status': 'BLOCKED',
+                'is_verified': False,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+        serializer_user = User(
+            id=42,
+            email='student@example.com',
+            password_hash='current-hash',
+            full_name='Student Name',
+            avatar_url=None,
+            phone=None,
+            university=None,
+            role='STUDENT',
+            status='ACTIVE',
+            created_at=self.user.created_at,
+            updated_at=self.user.created_at,
+        )
+        serializer_user.save = Mock(return_value=serializer_user)
+
+        with patch(
+            'users.api_views.User.objects.select_related',
+        ) as select_related:
+            select_related.return_value.get.return_value = serializer_user
+            response = ProfileView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Updated Name')
+        self.assertEqual(response.data['email'], 'student@example.com')
+        self.assertEqual(response.data['phone'], None)
+        self.assertEqual(response.data['role'], 'student')
+        serializer_user.save.assert_called_once()
+        self.assertEqual(serializer_user.full_name, 'Updated Name')
+
+    def test_password_change_rejects_same_and_policy_invalid_passwords(self):
+        for new_password, validator_error in (
+            ('current-password', None),
+            ('12345678', ['This password is too common.']),
+        ):
+            with self.subTest(new_password=new_password):
+                request = self.factory.post(
+                    '/api/auth/change-password/',
+                    {
+                        'old_password': 'correct-current',
+                        'new_password': new_password,
+                    },
+                    format='json',
+                )
+                view = ChangePasswordView()
+                request = view.initialize_request(request)
+                request.user = self.user
+                manager = Mock()
+                manager.select_for_update.return_value.get.return_value = self.user
+                with patch(
+                    'users.api_views.User.objects',
+                    manager,
+                ), patch(
+                    'users.api_views.check_password',
+                    side_effect=lambda candidate, _hash: (
+                        candidate == 'correct-current'
+                        or candidate == 'current-password'
+                    ),
+                ), patch(
+                    'users.api_views.validate_password',
+                    side_effect=(
+                        DjangoValidationError(validator_error)
+                        if validator_error
+                        else None
+                    ),
+                ), patch(
+                    'users.api_views.make_password',
+                    return_value='new-hash',
+                ):
+                    with self.assertRaises(RestFrameworkValidationError) as error:
+                        ChangePasswordView.post.__wrapped__(view, request)
+
+                if validator_error:
+                    self.assertEqual(
+                        error.exception.detail['new_password'],
+                        validator_error,
+                    )
+                else:
+                    self.assertIn(
+                        'khác mật khẩu hiện tại',
+                        str(error.exception.detail),
+                    )
+                self.assertEqual(self.user.password_hash, 'current-hash')
+
+    def test_password_change_applies_password_policy_and_updates_hash(self):
+        request = self.factory.post(
+            '/api/auth/change-password/',
+            {
+                'old_password': 'correct-current',
+                'new_password': 'Str0ng-New-Passphrase!',
+            },
+            format='json',
+        )
+        view = ChangePasswordView()
+        request = view.initialize_request(request)
+        request.user = self.user
+        manager = Mock()
+        manager.select_for_update.return_value.get.return_value = self.user
+        with patch(
+            'users.api_views.User.objects',
+            manager,
+        ), patch(
+            'users.api_views.check_password',
+            side_effect=lambda candidate, _hash: candidate == 'correct-current',
+        ), patch('users.api_views.validate_password') as validate, patch(
+            'users.api_views.make_password',
+            return_value='new-hash',
+        ):
+            response = ChangePasswordView.post.__wrapped__(
+                view,
+                request,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.user.password_hash, 'new-hash')
+        self.user.save.assert_called_once_with(
+            update_fields=['password_hash', 'updated_at'],
+        )
+        validate.assert_called_once_with('Str0ng-New-Passphrase!', self.user)
+
 
 # Create your tests here.

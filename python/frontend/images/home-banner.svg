@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="520" viewBox="0 0 1600 520" fill="none">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1600" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E7F0EA"/>
+      <stop offset="1" stop-color="#D5E4DD"/>
+    </linearGradient>
+    <linearGradient id="shelf" x1="970" y1="82" x2="1500" y2="442" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F3DCC0"/>
+      <stop offset="1" stop-color="#D9B58D"/>
+    </linearGradient>
+    <linearGradient id="bookTeal" x1="1047" y1="188" x2="1168" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3A7374"/>
+      <stop offset="1" stop-color="#21474D"/>
+    </linearGradient>
+    <linearGradient id="bookCoral" x1="1213" y1="129" x2="1316" y2="428" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D99472"/>
+      <stop offset="1" stop-color="#B96650"/>
+    </linearGradient>
+    <linearGradient id="bookBlue" x1="1340" y1="177" x2="1441" y2="435" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#AABEC5"/>
+      <stop offset="1" stop-color="#668A91"/>
+    </linearGradient>
+    <filter id="shadow" x="928" y="63" width="594" height="443" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="2" fill="#315B58" fill-opacity=".12"/>
+    </pattern>
+  </defs>
+  <path fill="url(#paper)" d="M0 0h1600v520H0z"/>
+  <path fill="url(#dots)" d="M0 0h1600v520H0z"/>
+  <circle cx="1470" cy="54" r="206" fill="#F8E9D3" fill-opacity=".56"/>
+  <circle cx="998" cy="499" r="232" fill="#B7D0C5" fill-opacity=".32"/>
+  <ellipse cx="1230" cy="448" fill="#355B58" fill-opacity=".22" rx="266" ry="35" filter="url(#shadow)"/>
+  <path fill="url(#shelf)" d="M1003 326h459v111h-459z"/>
+  <path fill="#C59D75" d="M981 425h501v22H981z"/>
+  <path fill="#B88D66" d="M1021 445h24v49h-24zm402 0h24v49h-24z"/>
+  <path fill="url(#bookTeal)" d="m1046 166 121-18 42 277-121 18z"/>
+  <path fill="#F1D7A9" fill-opacity=".82" d="m1064 195 86-13 3 19-86 13z"/>
+  <path fill="#DCE8D9" fill-opacity=".78" d="m1077 228 67-10 2 11-67 10zm4 23 68-10 2 11-68 10z"/>
+  <path fill="url(#bookCoral)" d="m1209 101 104 11-31 318-104-11z"/>
+  <path fill="#F8E3C9" fill-opacity=".84" d="m1219 135 72 8-2 16-72-8z"/>
+  <path fill="#F8E3C9" fill-opacity=".72" d="m1211 181 74 8-1 10-74-8zm-3 24 74 8-1 10-74-8z"/>
+  <path fill="url(#bookBlue)" d="m1347 157 95 25-65 253-95-25z"/>
+  <path fill="#EFF1DE" fill-opacity=".85" d="m1350 191 66 18-4 14-66-18z"/>
+  <path fill="#EFF1DE" fill-opacity=".72" d="m1337 230 65 17-3 10-65-17zm-6 23 65 17-3 10-65-17z"/>
+  <path fill="#F4D5A7" d="M1175 304h32v90h-32z"/>
+  <path fill="#F4D5A7" d="M1170 291h42v17h-42z"/>
+  <circle cx="1189" cy="280" r="17" fill="#D99472"/>
+  <path fill="#365E5A" d="m1188 257 4 16-8-5 4-11z"/>
+  <path fill="#B96650" d="M1181 279c-17-20-10-34 5-27 4 2 6 8 5 14 4-11 15-13 18-5 4 9-8 19-28 18z"/>
+  <path stroke="#FAF4E9" stroke-opacity=".75" stroke-width="2" d="M965 106h165M965 121h104"/>
+  <circle cx="902" cy="114" r="5" fill="#B96650"/>
+  <circle cx="935" cy="158" r="3" fill="#3A7374"/>
+  <circle cx="1510" cy="268" r="6" fill="#F4D5A7"/>
+</svg>

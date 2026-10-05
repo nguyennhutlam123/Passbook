@@ -35,6 +35,10 @@ PASSBOOK_ENVIRONMENT = os.environ.get(
     'PASSBOOK_ENVIRONMENT',
     'production',
 ).lower()
+PASSBOOK_OTP_ENABLED = os.environ.get(
+    'PASSBOOK_OTP_ENABLED',
+    'true' if PASSBOOK_ENVIRONMENT in ('local', 'test') else 'false',
+).lower() == 'true'
 
 ALLOWED_HOSTS = [
     host.strip()

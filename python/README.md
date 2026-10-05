@@ -50,7 +50,7 @@ pip install -r requirements.txt
 
 Đặt các biến môi trường theo `backend/.env.example` trong shell hiện tại hoặc công cụ quản lý môi trường. Với cấu hình local, có thể sao chép file mẫu thành `backend/.env`, điền Gmail App Password vào đó rồi nạp file khi chạy backend. Không commit file `.env`.
 
-Email xác nhận đơn hàng và email khi quản trị viên đổi trạng thái đơn dùng SMTP hiện có. Cần cấu hình `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL`; nếu thiếu thông tin SMTP, thông báo trong ứng dụng vẫn được tạo nhưng backend ghi rõ lỗi gửi email vào log.
+SMTP vẫn được giữ cho email nghiệp vụ như xác nhận đơn hàng và cập nhật trạng thái đơn. Cấu hình `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` và `DEFAULT_FROM_EMAIL` khi cần gửi email. OTP được bật mặc định ở môi trường `local`/`test` và tắt ở production; đặt `PASSBOOK_OTP_ENABLED=True` để bật lại. Khi OTP tắt, đăng ký không cần xác minh email, còn đặt lại mật khẩu và đổi thông tin liên hệ qua OTP tạm thời không khả dụng. Trên Render, giữ `PASSBOOK_OTP_ENABLED=False` nếu chưa cấu hình dịch vụ gửi OTP.
 
 ## Chạy backend
 

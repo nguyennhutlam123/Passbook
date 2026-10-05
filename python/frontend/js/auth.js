@@ -6,6 +6,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const forgotOtpForm = document.querySelector("[data-forgot-otp-form]");
     const resetPasswordForm = document.querySelector("[data-reset-password-form]");
     const registerSuccess = document.querySelector("[data-register-success]");
+    AuthAPI.options().then(({otp_enabled: otpEnabled}) => {
+        if (otpEnabled) return;
+        const forgotToggle = document.querySelector("[data-forgot-toggle]");
+        if (forgotToggle) forgotToggle.hidden = true;
+        const disabledNote = document.querySelector("[data-otp-disabled-note]");
+        if (disabledNote) disabledNote.hidden = false;
+    }).catch((error) => {
+        showToast(`Không thể tải cấu hình xác minh: ${error.message}`);
+    });
     let pendingRegistrationEmail = "";
     let pendingResetTarget = "";
     const otpTimers = new WeakMap();
@@ -106,6 +115,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 phone: data.get("phone")?.toString().trim() || "",
                 password: data.get("password"),
             });
+            if (!result.verification_required) {
+                registerForm.hidden = true;
+                registerSuccess.hidden = false;
+                document.querySelector(".auth-switch")?.setAttribute("hidden", "");
+                return;
+            }
             pendingRegistrationEmail = data.get("email").toString().trim().toLowerCase();
             registerForm.hidden = true;
             registerOtpForm.hidden = false;
@@ -138,6 +153,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             stopOtpTimer(registerOtpForm);
             registerOtpForm.hidden = true;
+            registerSuccess.querySelector("h2").textContent = "Email đã được xác minh";
             registerSuccess.hidden = false;
             document.querySelector(".auth-switch")?.setAttribute("hidden", "");
         } catch (error) {

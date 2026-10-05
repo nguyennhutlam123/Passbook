@@ -33,6 +33,7 @@ from users.api_views import (
 )
 from users.models import Faculty, Language, Major, Subject, University
 from users.otp_api_views import (
+    AuthOptionsView,
     ChangeContactRequestView,
     ForgotPasswordView,
     OtpRequestView,
@@ -315,6 +316,7 @@ class CatalogOptionsView(APIView):
 urlpatterns = [
     path('health/', health_check, name='health-check'),
     path('catalog/options/', CatalogOptionsView.as_view(), name='catalog-options'),
+    path('auth/options/', AuthOptionsView.as_view(), name='auth-options'),
     path(
         'uploads/cloudinary/signature/',
         CloudinaryUploadSignatureView.as_view(),

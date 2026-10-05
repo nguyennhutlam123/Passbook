@@ -85,6 +85,7 @@
                     <div>
                         <h3 id="profile-contact-title">Thông tin liên hệ</h3>
                         <p class="caption">Email và số điện thoại chỉ được cập nhật sau khi xác minh OTP.</p>
+                        <p class="caption" data-contact-otp-disabled hidden>Thay đổi thông tin liên hệ tạm thời không khả dụng vì xác minh OTP đang tắt.</p>
                     </div>
                     <form data-contact-form="email">
                         <label class="form-label" for="profile-email">Email mới</label>
@@ -161,13 +162,13 @@
     <script src="js/components/common/common.js"></script>
     <script src="js/api.js"></script>
     <script src="js/api/utils.js"></script>
-    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/auth-api.js?v=otp-disabled-20261006"></script>
     <script src="js/api/books-api.js"></script>
     <script src="js/api/users-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
     <script src="js/api/reports-api.js"></script>
     <script src="js/main.js"></script>
     <script src="js/profile.js?v=report-status-20261006"></script>
-    <script src="js/profile-account.js?v=profile-v5"></script>
+    <script src="js/profile-account.js?v=otp-disabled-20261006"></script>
 </body>
 </html>

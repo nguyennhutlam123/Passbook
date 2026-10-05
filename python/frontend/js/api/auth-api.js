@@ -28,6 +28,7 @@
 
     global.AuthAPI = Object.freeze({
         login,
+        options: () => client.get("/auth/options/"),
         register: (data) => client.post("/auth/register/", data),
         logout,
         refresh: (refresh) => client.post("/auth/token/refresh/", {refresh}),

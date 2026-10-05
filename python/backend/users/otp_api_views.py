@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import OtpVerification, User
-from .services import issue_otp, verify_otp
+from .services import ensure_otp_enabled, issue_otp, verify_otp
 
 OTP_PURPOSES = {
     'REGISTER',
@@ -25,6 +25,11 @@ OTP_PURPOSES = {
     'CHANGE_EMAIL',
     'CHANGE_PHONE',
 }
+
+
+class AuthOptionsView(APIView):
+    def get(self, request):
+        return Response({'otp_enabled': settings.PASSBOOK_OTP_ENABLED})
 
 
 def _channel_for_target(target):
@@ -80,6 +85,7 @@ def _validate_target(value):
 
 class OtpRequestView(APIView):
     def post(self, request):
+        ensure_otp_enabled()
         serializer = OtpResendSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         target = serializer.validated_data['target']
@@ -140,6 +146,7 @@ class OtpRequestView(APIView):
 
 class OtpVerifyView(APIView):
     def post(self, request):
+        ensure_otp_enabled()
         serializer = OtpVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -224,6 +231,7 @@ class OtpVerifyView(APIView):
 
 class ForgotPasswordView(APIView):
     def post(self, request):
+        ensure_otp_enabled()
         serializer = TargetInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         target = serializer.validated_data['target']
@@ -257,6 +265,7 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 class ResetPasswordView(APIView):
     def post(self, request):
+        ensure_otp_enabled()
         serializer = ResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -297,6 +306,7 @@ class ChangeContactRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, channel):
+        ensure_otp_enabled()
         if channel == 'email':
             serializer = serializers.EmailField()
             target = serializer.run_validation(request.data.get('email'))

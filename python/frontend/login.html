@@ -25,6 +25,7 @@
                 </div>
                 <button class="button button-primary" type="submit">Đăng nhập</button>
                 <a class="auth-link" href="#forgot-password" data-forgot-toggle>Quên mật khẩu?</a>
+                <p class="caption" data-otp-disabled-note hidden>Đặt lại mật khẩu tạm thời không khả dụng vì xác minh OTP đang tắt.</p>
             </form>
             <form data-forgot-password-form novalidate hidden>
                 <h2>Đặt lại mật khẩu</h2>
@@ -69,9 +70,9 @@
     <script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js"></script>
     <script src="js/api.js"></script>
-    <script src="js/api/auth-api.js"></script>
+    <script src="js/api/auth-api.js?v=otp-disabled-20261006"></script>
     <script src="js/api/notifications-api.js"></script>
     <script src="js/main.js"></script>
-    <script src="js/auth.js"></script>
+    <script src="js/auth.js?v=otp-disabled-20261006"></script>
 </body>
 </html>

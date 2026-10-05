@@ -327,6 +327,17 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    AuthAPI.options().then(({otp_enabled: otpEnabled}) => {
+        if (otpEnabled) return;
+        page.querySelectorAll("[data-contact-form]").forEach((form) => {
+            form.hidden = true;
+        });
+        const disabledNote = page.querySelector("[data-contact-otp-disabled]");
+        if (disabledNote) disabledNote.hidden = false;
+    }).catch((error) => {
+        showToast(`Không thể tải cấu hình xác minh: ${error.message}`);
+    });
+
     addressForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!addressForm.reportValidity()) return;

@@ -26,7 +26,9 @@ from .api_views import (
     ActiveUserTokenRefreshSerializer,
     ChangePasswordView,
     LogoutView,
+    LoginView,
     ProfileView,
+    RegisterView,
     UserAddressDetailView,
     UserAddressListCreateView,
 )
@@ -144,6 +146,7 @@ class _OtpManager:
         return row
 
 
+@override_settings(PASSBOOK_OTP_ENABLED=True)
 class OtpServiceTests(SimpleTestCase):
     def setUp(self):
         self.manager = _OtpManager()
@@ -420,6 +423,7 @@ class OtpServiceTests(SimpleTestCase):
         self.assertFalse(any(re.search(r'\b654321\b', message) for message in records))
 
 
+@override_settings(PASSBOOK_OTP_ENABLED=True)
 class OtpApiTests(SimpleTestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -688,6 +692,128 @@ class OtpApiTests(SimpleTestCase):
                     )
                     self.assertEqual(row.purpose, purpose)
                     self.assertTrue(check_password('123456', row.otp_hash))
+
+
+@override_settings(PASSBOOK_OTP_ENABLED=False)
+class OtpDisabledApiTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+    def test_register_activates_account_without_sending_otp(self):
+        user = SimpleNamespace(
+            id=42,
+            status='PENDING_VERIFICATION',
+            updated_at=None,
+            save=Mock(),
+        )
+        serializer = Mock()
+        serializer.is_valid.return_value = True
+        serializer.save.return_value = user
+        request = self.factory.post('/api/auth/register/', {}, format='json')
+        view = RegisterView()
+        request = view.initialize_request(request)
+
+        with patch('users.api_views.RegisterSerializer', return_value=serializer), patch(
+            'users.api_views.RegisteredUserSerializer',
+            return_value=SimpleNamespace(data={'id': 42, 'status': 'active'}),
+        ), patch('users.api_views.issue_otp') as issue:
+            response = RegisterView.post.__wrapped__(view, request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.data['verification_required'])
+        self.assertEqual(user.status, 'ACTIVE')
+        user.save.assert_called_once_with(update_fields=['status', 'updated_at'])
+        issue.assert_not_called()
+
+    def test_otp_endpoints_report_disabled_without_sending_mail(self):
+        from .otp_api_views import (
+            AuthOptionsView,
+            ChangeContactRequestView,
+            ForgotPasswordView,
+            OtpRequestView,
+            ResetPasswordView,
+            OtpVerifyView,
+        )
+
+        options = AuthOptionsView.as_view()(self.factory.get('/api/auth/options/'))
+        self.assertEqual(options.data, {'otp_enabled': False})
+
+        request = self.factory.post('/api/auth/resend-otp/', {}, format='json')
+        with patch('users.otp_api_views.issue_otp') as issue:
+            response = OtpRequestView.as_view()(request)
+        self.assertEqual(response.status_code, 503)
+        issue.assert_not_called()
+
+        request = self.factory.post('/api/auth/verify-otp/', {}, format='json')
+        with patch('users.otp_api_views.verify_otp') as verify:
+            response = OtpVerifyView.as_view()(request)
+        self.assertEqual(response.status_code, 503)
+        verify.assert_not_called()
+
+        request = self.factory.post('/api/auth/forgot-password/', {}, format='json')
+        with patch('users.otp_api_views.issue_otp') as issue:
+            response = ForgotPasswordView.as_view()(request)
+        self.assertEqual(response.status_code, 503)
+        issue.assert_not_called()
+
+        user = SimpleNamespace(id=42, is_authenticated=True)
+        request = self.factory.post(
+            '/api/auth/change-email/request/',
+            {'email': 'new@example.com'},
+            format='json',
+        )
+        force_authenticate(request, user=user)
+        with patch('users.otp_api_views.issue_otp') as issue:
+            response = ChangeContactRequestView.as_view()(request, channel='email')
+        self.assertEqual(response.status_code, 503)
+        issue.assert_not_called()
+
+        request = self.factory.post('/api/auth/reset-password/', {}, format='json')
+        response = ResetPasswordView.as_view()(request)
+        self.assertEqual(response.status_code, 503)
+
+    def test_pending_user_can_login_with_password_when_otp_is_disabled(self):
+        user = SimpleNamespace(
+            id=42,
+            email='student@example.com',
+            status='PENDING_VERIFICATION',
+            password_hash=make_password('correct-password'),
+            updated_at=None,
+            save=Mock(),
+        )
+        query = Mock()
+        query.first.return_value = user
+        serializer = Mock()
+        serializer.is_valid.return_value = True
+        serializer.validated_data = {
+            'email': user.email,
+            'password': 'correct-password',
+        }
+        class FakeRefresh:
+            access_token = 'test-access'
+
+            def __str__(self):
+                return 'test-refresh'
+
+        request = self.factory.post('/api/auth/login/', {}, format='json')
+
+        with patch('users.api_views.LoginSerializer', return_value=serializer), patch.object(
+            User.objects,
+            'filter',
+            return_value=query,
+        ), patch(
+            'users.api_views.RefreshToken.for_user',
+            return_value=FakeRefresh(),
+        ), patch(
+            'users.api_views.RegisteredUserSerializer',
+            return_value=SimpleNamespace(data={'id': user.id, 'status': 'active'}),
+        ):
+            response = LoginView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(user.status, 'ACTIVE')
+        self.assertEqual(response.data['access'], 'test-access')
+        user.save.assert_called_once_with(update_fields=['status', 'updated_at'])
 
 
 class AdminPermissionTests(SimpleTestCase):

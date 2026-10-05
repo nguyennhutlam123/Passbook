@@ -140,20 +140,21 @@ class _OtpManager:
         return row
 
 
-class ResendEmailServiceTests(SimpleTestCase):
+class BrevoEmailServiceTests(SimpleTestCase):
     @override_settings(
-        EMAIL_API_KEY='test-api-key',
-        EMAIL_API_TIMEOUT=7,
-        DEFAULT_FROM_EMAIL='Passbook <no-reply@example.test>',
+        BREVO_API_KEY='test-api-key',
+        BREVO_API_TIMEOUT=7,
+        BREVO_SENDER_EMAIL='no-reply@example.test',
+        BREVO_SENDER_NAME='Passbook',
     )
-    def test_send_email_uses_resend_https_api(self):
+    def test_send_email_uses_brevo_https_api(self):
         import json
 
         from users.services.email import send_email
 
         with patch('users.services.email.urllib.request.build_opener') as build_opener:
             opener = build_opener.return_value
-            opener.open.return_value.__enter__.return_value.status = 200
+            opener.open.return_value.__enter__.return_value.status = 201
             send_email(
                 recipient='student@example.test',
                 subject='Passbook verification code',
@@ -162,25 +163,27 @@ class ResendEmailServiceTests(SimpleTestCase):
 
         build_opener.assert_called_once()
         request = opener.open.call_args.args[0]
-        self.assertEqual(request.full_url, 'https://api.resend.com/emails')
+        self.assertEqual(request.full_url, 'https://api.brevo.com/v3/smtp/email')
         self.assertEqual(request.method, 'POST')
-        self.assertEqual(
-            request.get_header('Authorization'),
-            'Bearer test-api-key',
-        )
-        self.assertEqual(request.get_header('User-agent'), 'Passbook/1.0')
+        self.assertEqual(request.get_header('Api-key'), 'test-api-key')
+        self.assertEqual(request.get_header('Content-type'), 'application/json')
+        self.assertEqual(request.get_header('Accept'), 'application/json')
         self.assertEqual(opener.open.call_args.kwargs['timeout'], 7)
         self.assertEqual(json.loads(request.data), {
-            'from': 'Passbook <no-reply@example.test>',
-            'to': ['student@example.test'],
+            'sender': {
+                'name': 'Passbook',
+                'email': 'no-reply@example.test',
+            },
+            'to': [{'email': 'student@example.test'}],
             'subject': 'Passbook verification code',
-            'text': 'Your code is 123456.',
+            'htmlContent': '<p>Your code is 123456.</p>',
         })
 
     @override_settings(
-        EMAIL_API_KEY='test-api-key',
-        EMAIL_API_TIMEOUT=10,
-        DEFAULT_FROM_EMAIL='no-reply@example.test',
+        BREVO_API_KEY='test-api-key',
+        BREVO_API_TIMEOUT=10,
+        BREVO_SENDER_EMAIL='no-reply@example.test',
+        BREVO_SENDER_NAME='Passbook',
     )
     def test_provider_4xx_and_5xx_are_delivery_errors(self):
         from urllib.error import HTTPError
@@ -192,7 +195,7 @@ class ResendEmailServiceTests(SimpleTestCase):
                 'users.services.email.urllib.request.build_opener',
             ) as build_opener:
                 build_opener.return_value.open.side_effect = HTTPError(
-                    'https://api.resend.com/emails',
+                    'https://api.brevo.com/v3/smtp/email',
                     status_code,
                     'provider error',
                     hdrs=None,
@@ -208,9 +211,10 @@ class ResendEmailServiceTests(SimpleTestCase):
                 self.assertNotIn('test-api-key', str(raised.exception))
 
     @override_settings(
-        EMAIL_API_KEY='test-api-key',
-        EMAIL_API_TIMEOUT=10,
-        DEFAULT_FROM_EMAIL='no-reply@example.test',
+        BREVO_API_KEY='test-api-key',
+        BREVO_API_TIMEOUT=10,
+        BREVO_SENDER_EMAIL='no-reply@example.test',
+        BREVO_SENDER_NAME='Passbook',
     )
     def test_provider_timeout_is_delivery_error(self):
         from users.services.email import EmailProviderError, send_email
@@ -228,9 +232,10 @@ class ResendEmailServiceTests(SimpleTestCase):
         build_opener.return_value.open.assert_called_once()
 
     @override_settings(
-        EMAIL_API_KEY='',
-        EMAIL_API_TIMEOUT=10,
-        DEFAULT_FROM_EMAIL='no-reply@example.test',
+        BREVO_API_KEY='',
+        BREVO_API_TIMEOUT=10,
+        BREVO_SENDER_EMAIL='no-reply@example.test',
+        BREVO_SENDER_NAME='Passbook',
     )
     def test_missing_api_key_fails_without_http_request(self):
         from users.services.email import EmailProviderError, send_email
@@ -245,11 +250,30 @@ class ResendEmailServiceTests(SimpleTestCase):
         build_opener.assert_not_called()
 
     @override_settings(
-        EMAIL_API_KEY='test-api-key',
-        EMAIL_API_TIMEOUT=0,
-        DEFAULT_FROM_EMAIL='no-reply@example.test',
+        BREVO_API_KEY='test-api-key',
+        BREVO_API_TIMEOUT=0,
+        BREVO_SENDER_EMAIL='no-reply@example.test',
+        BREVO_SENDER_NAME='Passbook',
     )
     def test_invalid_timeout_fails_without_http_request(self):
+        from users.services.email import EmailProviderError, send_email
+
+        with patch('users.services.email.urllib.request.build_opener') as build_opener:
+            with self.assertRaises(EmailProviderError):
+                send_email(
+                    recipient='student@example.test',
+                    subject='Verification',
+                    text='Code 123456',
+                )
+        build_opener.assert_not_called()
+
+    @override_settings(
+        BREVO_API_KEY='test-api-key',
+        BREVO_API_TIMEOUT=10,
+        BREVO_SENDER_EMAIL='',
+        BREVO_SENDER_NAME='Passbook',
+    )
+    def test_missing_sender_fails_without_http_request(self):
         from users.services.email import EmailProviderError, send_email
 
         with patch('users.services.email.urllib.request.build_opener') as build_opener:
@@ -372,9 +396,10 @@ class OtpServiceTests(SimpleTestCase):
         self.assertNotIn('otp', serializer.data)
 
     @override_settings(
-        EMAIL_API_KEY='test-api-key',
-        EMAIL_API_TIMEOUT=10,
-        DEFAULT_FROM_EMAIL='no-reply@example.test',
+        BREVO_API_KEY='test-api-key',
+        BREVO_API_TIMEOUT=10,
+        BREVO_SENDER_EMAIL='no-reply@example.test',
+        BREVO_SENDER_NAME='Passbook',
     )
     def test_email_provider_failure_becomes_otp_delivery_error(self):
         from urllib.error import HTTPError
@@ -382,7 +407,7 @@ class OtpServiceTests(SimpleTestCase):
         from .services.otp import OtpDeliveryError, issue_otp
 
         error = HTTPError(
-            'https://api.resend.com/emails',
+            'https://api.brevo.com/v3/smtp/email',
             500,
             'provider error',
             hdrs=None,

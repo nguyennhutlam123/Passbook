@@ -2,12 +2,13 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from html import escape
 
 from django.conf import settings
 
 
 logger = logging.getLogger(__name__)
-RESEND_EMAILS_URL = 'https://api.resend.com/emails'
+BREVO_EMAILS_URL = 'https://api.brevo.com/v3/smtp/email'
 
 
 class EmailProviderError(Exception):
@@ -20,26 +21,30 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 def send_email(*, recipient, subject, text):
-    api_key = settings.EMAIL_API_KEY.strip()
-    sender = settings.DEFAULT_FROM_EMAIL.strip()
-    timeout = settings.EMAIL_API_TIMEOUT
-    if not api_key or not sender or timeout <= 0:
+    api_key = settings.BREVO_API_KEY.strip()
+    sender_email = settings.BREVO_SENDER_EMAIL.strip()
+    sender_name = settings.BREVO_SENDER_NAME.strip()
+    timeout = settings.BREVO_API_TIMEOUT
+    if not api_key or not sender_email or not sender_name or timeout <= 0:
         logger.warning('OTP email provider configuration is missing or invalid.')
         raise EmailProviderError('Email provider is not configured.')
 
     body = json.dumps({
-        'from': sender,
-        'to': [recipient],
+        'sender': {
+            'name': sender_name,
+            'email': sender_email,
+        },
+        'to': [{'email': recipient}],
         'subject': subject,
-        'text': text,
+        'htmlContent': f'<p>{escape(text)}</p>',
     }).encode('utf-8')
     request = urllib.request.Request(
-        RESEND_EMAILS_URL,
+        BREVO_EMAILS_URL,
         data=body,
         headers={
-            'Authorization': f'Bearer {api_key}',
+            'api-key': api_key,
             'Content-Type': 'application/json',
-            'User-Agent': 'Passbook/1.0',
+            'Accept': 'application/json',
         },
         method='POST',
     )
@@ -50,7 +55,7 @@ def send_email(*, recipient, subject, text):
             status_code = response.status
     except urllib.error.HTTPError as exc:
         logger.warning(
-            'OTP email provider rejected delivery (HTTP %d).',
+            'Brevo email delivery failed (HTTP %d).',
             exc.code,
         )
         raise EmailProviderError(
@@ -58,14 +63,14 @@ def send_email(*, recipient, subject, text):
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         logger.warning(
-            'OTP email provider request failed (%s).',
+            'Brevo email request failed (%s).',
             type(exc).__name__,
         )
         raise EmailProviderError('Email provider request failed.') from exc
 
     if not 200 <= status_code < 300:
         logger.warning(
-            'OTP email provider returned an unsuccessful status (HTTP %d).',
+            'Brevo email delivery failed (HTTP %d).',
             status_code,
         )
         raise EmailProviderError(

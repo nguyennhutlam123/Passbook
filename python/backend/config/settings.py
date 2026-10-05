@@ -126,8 +126,10 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
-EMAIL_API_KEY = os.environ.get('EMAIL_API_KEY', '')
-EMAIL_API_TIMEOUT = int(os.environ.get('EMAIL_API_TIMEOUT', '10'))
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL', '')
+BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', '')
+BREVO_API_TIMEOUT = int(os.environ.get('BREVO_API_TIMEOUT', '10'))
 DEFAULT_FROM_EMAIL = os.environ.get(
     'DEFAULT_FROM_EMAIL',
     EMAIL_HOST_USER,

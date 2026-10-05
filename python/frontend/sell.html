@@ -23,16 +23,20 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="book-subject">Môn học *</label>
-                    <select id="book-subject" name="subject_id">
-                        <option value="">Chọn môn học</option>
-                    </select>
-                    <span class="form-error" data-error-for="subject_id"></span>
+                    <input id="book-subject" name="subject_name" type="text" list="book-subject-options" maxlength="255" placeholder="Nhập hoặc chọn môn học" required>
+                    <input name="subject_id" type="hidden">
+                    <datalist id="book-subject-options"></datalist>
+                    <span class="form-error" data-error-for="subject_name"></span>
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="book-code">Danh mục</label>
-                    <select id="book-code" name="category_id">
+                    <label class="form-label" for="book-code">Danh mục *</label>
+                    <select id="book-code" name="category_id" required>
                         <option value="">Chọn danh mục</option>
                     </select>
+                    <span class="form-error" data-error-for="category_id"></span>
+                    <button class="button button-outline" type="button" data-retry-catalog-options hidden>
+                        Thử tải lại danh mục
+                    </button>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Hình thức giao dịch *</label>

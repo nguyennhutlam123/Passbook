@@ -3,6 +3,11 @@
 
     const storage = global.PassbookStorage;
 
+    if (global.localStorage.getItem("demoProfile") === "true") {
+        storage.clearSession();
+        global.localStorage.removeItem("demoProfile");
+    }
+
     function updateUser(user) {
         storage.setUser(user);
         global.dispatchEvent(new CustomEvent("passbook:user-updated", {detail: user}));
@@ -18,43 +23,12 @@
         global.dispatchEvent(new CustomEvent("passbook:logout", {detail: {reason}}));
     }
 
-    function isDemoMode() {
-        const url = new URL(global.location.href);
-        const demo = url.searchParams.get("demo") || global.localStorage.getItem("demoProfile");
-        return ["1", "true", "yes"].includes(String(demo || "").trim().toLowerCase());
-    }
-
-    function demoUser() {
-        return {
-            id: "demo-profile",
-            name: "Nguyễn Lâm",
-            email: "lam.passbook@gmail.com",
-            university: {name: "HCMUE"},
-            is_verified: true,
-            role: "USER",
-            bio: "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.",
-        };
-    }
-
     function getCurrentUser() {
-        const user = storage.getUser();
-        if (user) return user;
-        if (isDemoMode()) {
-            const demo = demoUser();
-            storage.setUser(demo);
-            return demo;
-        }
-        return null;
+        return storage.getUser();
     }
 
     function isLoggedIn() {
-        if (storage.isAuthenticated()) return true;
-        if (isDemoMode()) {
-            const demo = demoUser();
-            storage.setUser(demo);
-            return true;
-        }
-        return false;
+        return storage.isAuthenticated();
     }
 
     global.PassbookAuth = Object.freeze({

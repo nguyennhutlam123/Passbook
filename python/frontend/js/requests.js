@@ -25,6 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentPage = 1;
     let activeFilter = "all";
     let editingRequestId = null;
+    let loadRequestId = 0;
 
     const node = (tag, className, text) => {
         const element = document.createElement(tag);
@@ -194,12 +195,14 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const load = async () => {
+        const requestId = ++loadRequestId;
         error.textContent = "";
         ownList.replaceChildren(PassbookCommonComponents.loadingStateElement("Đang tải yêu cầu của bạn..."));
         communityList.replaceChildren(PassbookCommonComponents.loadingStateElement("Đang tải yêu cầu cộng đồng..."));
         pagination.replaceChildren();
         try {
             const response = await BooksAPI.requests({page: currentPage, page_size: 20});
+            if (requestId !== loadRequestId) return;
             renderRows(response.results || []);
             const controls = PassbookCommonComponents.pagination({
                 previous: response.previous,
@@ -209,6 +212,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (controls) pagination.append(controls);
         } catch (requestError) {
+            if (requestId !== loadRequestId) return;
             ownList.replaceChildren(PassbookCommonComponents.emptyStateElement("Không thể tải yêu cầu."));
             communityList.replaceChildren();
             error.textContent = requestError.message;

@@ -23,6 +23,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let orderPage = 1;
     let reservationPage = 1;
     let borrowPage = 1;
+    let cartRequestId = 0;
+    let orderRequestId = 0;
+    let reservationRequestId = 0;
+    let borrowRequestId = 0;
 
     const setMessage = (container, message, className = "caption") => {
         const element = document.createElement("p");
@@ -121,8 +125,10 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadCart = async () => {
+        const requestId = ++cartRequestId;
         try {
             const cart = await OrdersAPI.cart();
+            if (requestId !== cartRequestId) return;
             const items = Array.isArray(cart.items) ? cart.items : [];
             const buyNowListingId = new URLSearchParams(location.search).get("buy_now");
             if (!items.length) {
@@ -174,6 +180,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 checkoutForm.hidden = true;
             }
         } catch (error) {
+            if (requestId !== cartRequestId) return;
             const failure = PassbookCommonComponents.emptyStateElement(
                 "Không thể tải giỏ hàng.",
                 "Kiểm tra kết nối rồi thử lại.",
@@ -588,9 +595,11 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadOrders = async () => {
+        const requestId = ++orderRequestId;
         setMessage(ordersList, "Đang tải đơn hàng...", "loading-state");
         try {
             const data = await OrdersAPI.list({page: orderPage, page_size: 50});
+            if (requestId !== orderRequestId) return;
             const nodes = (data.results || []).map((order) => {
                 const {element: card, detailsButton: details} = PassbookCommerceComponents.orderCard(order);
                 details.addEventListener("click", async () => {
@@ -621,6 +630,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (controls) nodes.push(controls);
             ordersList.replaceChildren(...nodes);
         } catch (error) {
+            if (requestId !== orderRequestId) return;
             setMessage(ordersList, error.message, "form-error");
         }
     };
@@ -667,9 +677,11 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadReservations = async () => {
+        const requestId = ++reservationRequestId;
         setMessage(reservationsList, "Đang tải yêu cầu...", "loading-state");
         try {
             const data = await ReservationsAPI.list({page: reservationPage, page_size: 50});
+            if (requestId !== reservationRequestId) return;
             const borrowReservations = (data.results || []).filter(
                 (reservation) => reservation.listing_type === "BORROW",
             );
@@ -752,6 +764,7 @@ document.addEventListener("DOMContentLoaded", () => {
             reservationsList.replaceChildren(...nodes);
             focusRequestedTicket("reservation_id", "reservationId");
         } catch (error) {
+            if (requestId !== reservationRequestId) return;
             setMessage(reservationsList, error.message, "form-error");
         }
     };
@@ -779,9 +792,11 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadBorrows = async () => {
+        const requestId = ++borrowRequestId;
         setMessage(borrowsList, "Đang tải giao dịch...", "loading-state");
         try {
             const data = await OrdersAPI.borrowOrders({page: borrowPage, page_size: 50});
+            if (requestId !== borrowRequestId) return;
             const nodes = (data.results || []).map((borrow) => {
                 const card = document.createElement("article");
                 card.className = "report-item borrow-ticket-card";
@@ -1006,6 +1021,7 @@ document.addEventListener("DOMContentLoaded", () => {
             borrowsList.replaceChildren(...nodes);
             focusRequestedTicket("borrow_id", "borrowId");
         } catch (error) {
+            if (requestId !== borrowRequestId) return;
             setMessage(borrowsList, error.message, "form-error");
         }
     };

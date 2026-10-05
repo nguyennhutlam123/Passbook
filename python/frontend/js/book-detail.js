@@ -99,7 +99,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             favoriteButton.setAttribute("aria-pressed", String(favorite));
             favoriteButton.textContent = favorite ? "♥ Đã lưu" : "♡ Lưu giáo trình";
             favoriteButton.dataset.favorite = String(book.id);
-            favoriteButton.addEventListener("click", () => toggleFavorite(book.id, favoriteButton));
+            favoriteButton.addEventListener("click", () => toggleFavorite(book.id));
             container.querySelector("[data-detail-title]").after(favoriteButton);
         }
         container.querySelector("[data-detail-price]").textContent = book.listing_type === "BORROW"
@@ -218,18 +218,28 @@ document.addEventListener("DOMContentLoaded", async () => {
         const avatar = document.createElement("span");
         avatar.className = "avatar";
         avatar.textContent = sellerName.slice(0, 2).toUpperCase();
-        const profileLink = document.createElement("a");
-        profileLink.href = `public-profile.html?id=${encodeURIComponent(book.seller.id)}`;
-        profileLink.textContent = sellerName;
-        sellerLine.append(avatar, profileLink);
+        let profileLink = null;
+        if (book.seller?.id) {
+            profileLink = document.createElement("a");
+            profileLink.href = `public-profile.html?id=${encodeURIComponent(book.seller.id)}`;
+            profileLink.textContent = sellerName;
+            sellerLine.append(avatar, profileLink);
+        } else {
+            const sellerLabel = document.createElement("span");
+            sellerLabel.textContent = sellerName;
+            sellerLine.append(avatar, sellerLabel);
+        }
         const school = document.createElement("p");
         school.className = "caption";
         school.textContent = book.seller?.university?.name || "Trường chưa khai báo";
-        const viewProfile = document.createElement("a");
-        viewProfile.className = "text-link";
-        viewProfile.href = profileLink.href;
-        viewProfile.textContent = "Xem trang cá nhân";
-        sellerPanel.append(sellerHeading, sellerLine, school, viewProfile);
+        sellerPanel.append(sellerHeading, sellerLine, school);
+        if (profileLink) {
+            const viewProfile = document.createElement("a");
+            viewProfile.className = "text-link";
+            viewProfile.href = profileLink.href;
+            viewProfile.textContent = "Xem trang cá nhân";
+            sellerPanel.append(viewProfile);
+        }
         const actions = container.querySelector("[data-detail-actions]");
         actions.innerHTML = "";
         if (book.status === "available" && Number(book.seller?.id) !== Number(PassbookAuth.getCurrentUser()?.id)) {

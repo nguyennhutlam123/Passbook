@@ -31,6 +31,7 @@ function attachImageFallbacks(root = document) {
 let favoriteBookIds = new Set();
 let favoriteBookIdsPromise = null;
 let navOutsideClickRegistered = false;
+const pendingFavoriteBookIds = new Set();
 
 async function loadFavoriteBookIds() {
     if (!isLoggedIn()) {
@@ -180,17 +181,29 @@ async function openConversationModal(conversationId) {
             .join(" ↔ ");
         heading.innerHTML = `<strong>${escapeHtml(contextTitle)}</strong>${participants ? `<span class="caption">${participants}</span>` : ""}`;
         await loadMessages();
+        let isSending = false;
+        const submitButton = form.querySelector("button[type='submit']");
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
+            if (isSending) return;
             const input = form.querySelector("textarea");
             const content = input.value.trim();
             if (!content) return;
+            isSending = true;
+            input.disabled = true;
+            submitButton.disabled = true;
+            submitButton.textContent = "Đang gửi...";
             try {
                 await MessagingAPI.sendMessage(conversationId, {content});
                 input.value = "";
                 await loadMessages();
             } catch (error) {
                 showToast(error.message);
+            } finally {
+                isSending = false;
+                input.disabled = false;
+                submitButton.disabled = false;
+                submitButton.textContent = "Gửi";
             }
         });
     } catch (error) {
@@ -209,23 +222,53 @@ function renderBookCard(book) {
     return PassbookBookComponents.bookCard(book, {favorite: isFavoriteBook(book.id)});
 }
 
-async function toggleFavorite(bookId, button) {
+async function toggleFavorite(bookId) {
     if (!isLoggedIn()) {
         window.location.href = "login.html";
         return;
     }
-    const isFavorite = button.getAttribute("aria-pressed") === "true";
+    const normalizedBookId = Number(bookId);
+    if (pendingFavoriteBookIds.has(normalizedBookId)) return;
+    const isFavorite = favoriteBookIds.has(normalizedBookId);
+    pendingFavoriteBookIds.add(normalizedBookId);
+    const updateButtons = (nextState) => {
+        document.querySelectorAll("[data-favorite]").forEach((favoriteButton) => {
+            if (Number(favoriteButton.dataset.favorite) !== normalizedBookId) return;
+            favoriteButton.classList.toggle("is-favorite", nextState);
+            favoriteButton.setAttribute("aria-pressed", String(nextState));
+            const previousLabel = favoriteButton.getAttribute("aria-label") || "";
+            const label = previousLabel.replace(/^(?:Bỏ lưu|Lưu)\s*/, "") || "giáo trình";
+            favoriteButton.setAttribute(
+                "aria-label",
+                `${nextState ? "Bỏ lưu" : "Lưu"} ${label}`,
+            );
+            favoriteButton.textContent = favoriteButton.classList.contains("favorite-button")
+                ? (nextState ? "♥" : "♡")
+                : (nextState ? "♥ Đã lưu" : "♡ Lưu giáo trình");
+            favoriteButton.disabled = false;
+        });
+    };
+    document.querySelectorAll("[data-favorite]").forEach((favoriteButton) => {
+        if (Number(favoriteButton.dataset.favorite) === normalizedBookId) {
+            favoriteButton.disabled = true;
+        }
+    });
     try {
-        if (isFavorite) await FavoritesAPI.remove(bookId);
-        else await FavoritesAPI.add(bookId);
-        if (isFavorite) favoriteBookIds.delete(Number(bookId));
-        else favoriteBookIds.add(Number(bookId));
-        button.classList.toggle("is-favorite", !isFavorite);
-        button.setAttribute("aria-pressed", String(!isFavorite));
-        button.textContent = isFavorite ? "♡" : "♥";
+        if (isFavorite) await FavoritesAPI.remove(normalizedBookId);
+        else await FavoritesAPI.add(normalizedBookId);
+        if (isFavorite) favoriteBookIds.delete(normalizedBookId);
+        else favoriteBookIds.add(normalizedBookId);
+        updateButtons(!isFavorite);
         showToast(isFavorite ? "Đã bỏ lưu giáo trình" : "Đã lưu giáo trình");
     } catch (error) {
         showToast(error.message);
+    } finally {
+        pendingFavoriteBookIds.delete(normalizedBookId);
+        document.querySelectorAll("[data-favorite]").forEach((favoriteButton) => {
+            if (Number(favoriteButton.dataset.favorite) === normalizedBookId) {
+                favoriteButton.disabled = false;
+            }
+        });
     }
 }
 
@@ -233,7 +276,7 @@ function bindFavoriteButtons(root = document) {
     root.querySelectorAll("[data-favorite]").forEach((button) => button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        toggleFavorite(Number(button.dataset.favorite), button);
+        toggleFavorite(Number(button.dataset.favorite));
     }));
 }
 
@@ -242,6 +285,12 @@ function renderHomepage() {
     const collections = document.querySelector("[data-category-collections]");
     const borrowGrid = document.querySelector("[data-home-borrow]");
     if (!newGrid || !collections || !borrowGrid) return;
+    const favoriteIdsReady = isLoggedIn()
+        ? loadFavoriteBookIds().catch((error) => {
+            showToast(error.message);
+            return favoriteBookIds;
+        })
+        : Promise.resolve(favoriteBookIds);
     BooksAPI.lendListings({page_size: 4}).then((data) => {
         const listings = data.results || [];
         const books = listings.map((listing) => ({
@@ -303,13 +352,7 @@ function renderHomepage() {
         </section>`;
     };
     BooksAPI.list({page_size: 24}).then(async (data) => {
-        if (isLoggedIn()) {
-            try {
-                await loadFavoriteBookIds();
-            } catch (error) {
-                showToast(error.message);
-            }
-        }
+        await favoriteIdsReady;
         const books = data.results || [];
         if (books.length) {
             newGrid.innerHTML = books.slice(0, 4).map(renderBookCard).join("");

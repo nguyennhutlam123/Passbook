@@ -7,13 +7,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const markAll = page.querySelector("[data-mark-all]");
     let currentPage = 1;
     let currentData;
+    let loadRequestId = 0;
 
     const load = async () => {
+        const requestId = ++loadRequestId;
         list.replaceChildren(PassbookCommonComponents.loadingState());
         pagination.replaceChildren();
         error.textContent = "";
         try {
             currentData = await NotificationsAPI.list({page: currentPage, page_size: 10});
+            if (requestId !== loadRequestId) return;
             const notifications = currentData.results || [];
             const nodes = notifications.map((notification) => {
                 const item = PassbookCommonComponents.notificationItem(notification);
@@ -47,6 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
             pagination.replaceChildren(controls);
             markAll.hidden = !notifications.some((item) => !item.is_read);
         } catch (requestError) {
+            if (requestId !== loadRequestId) return;
             const failure = PassbookCommonComponents.emptyStateElement(
                 "Không thể tải thông báo.",
                 "Kiểm tra kết nối rồi thử lại.",

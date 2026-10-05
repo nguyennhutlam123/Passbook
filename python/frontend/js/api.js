@@ -52,9 +52,9 @@
         return text;
     }
 
-    async function rawRequest(url, options = {}) {
+    async function rawRequest(url, options = {}, requestTimeout = timeoutMs) {
         const controller = new AbortController();
-        const timeout = global.setTimeout(() => controller.abort(), timeoutMs);
+        const timeout = global.setTimeout(() => controller.abort(), requestTimeout);
         try {
             return await global.fetch(url, {...options, signal: controller.signal});
         } catch (error) {
@@ -141,7 +141,7 @@
             init.body = JSON.stringify(body);
         }
 
-        let response = await rawRequest(url, init);
+        let response = await rawRequest(url, init, options.timeout);
         let retriedAfterRefresh = false;
         const apiPath = isApiRequest
             ? requestUrl.pathname.slice(apiBasePath.length) || "/"
@@ -161,7 +161,11 @@
             }
             const retryHeaders = new Headers(headers);
             retryHeaders.set("Authorization", `Bearer ${access}`);
-            response = await rawRequest(url, {...init, headers: retryHeaders});
+            response = await rawRequest(
+                url,
+                {...init, headers: retryHeaders},
+                options.timeout,
+            );
             retriedAfterRefresh = true;
         }
 

@@ -1,12 +1,7 @@
 document.addEventListener("DOMContentLoaded", async () => {
     if (!document.querySelector("[data-profile-page]")) return;
     if (!PassbookGuards.requireAuth()) return;
-    const user = PassbookAuth.getCurrentUser() || {
-        name: "Nguyễn Lâm",
-        email: "lam.passbook@gmail.com",
-        university: {name: "HCMUE"},
-        is_verified: true,
-    };
+    const user = PassbookAuth.getCurrentUser() || {};
     document.querySelector("[data-profile-name]").textContent = user.name || "Người dùng";
     document.querySelector("[data-profile-school]").textContent = user.university?.name || user.email || "";
     const verified = document.querySelector(".verified");

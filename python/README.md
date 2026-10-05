@@ -101,6 +101,8 @@ Mở `http://127.0.0.1:5500`. Frontend local gọi Django tại `http://127.0.0.
   phiên bản/năm/ngôn ngữ, condition, khoảng giá và sort. Các lựa chọn filter lấy từ API.
 - **Books:** marketplace Mua dùng `sale_listings`; marketplace Mượn dùng `lend_listings`
   và `borrow_terms`. Form đăng tin mặc định BUY cho client/dữ liệu legacy không gửi type.
+  Môn học có thể gửi `subject_id` đã tồn tại hoặc `subject_name`; tên mới được chuẩn hóa và
+  tạo/reuse bằng mã xác định để tránh tạo bản ghi trùng khi người dùng gửi lại.
   Mỗi tin hỗ trợ tối đa 10 ảnh JPG/PNG/WebP/GIF (10 MB/ảnh); backend xác minh định dạng,
   dung lượng và URL với Cloudinary trước khi lưu `BookImage`. Cloudinary cần được cấu hình
   qua `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` và `CLOUDINARY_API_SECRET` trong môi trường.

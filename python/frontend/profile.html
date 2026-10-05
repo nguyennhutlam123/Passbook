@@ -4,29 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trang cá nhân - PassBook</title>
-    <script>
-        (function () {
-            try {
-                const params = new URLSearchParams(window.location.search);
-                if (params.get("demo") === "1") {
-                    localStorage.setItem("demoProfile", "true");
-                    localStorage.setItem("accessToken", "demo-access-token");
-                    localStorage.setItem("refreshToken", "demo-refresh-token");
-                    localStorage.setItem("currentUser", JSON.stringify({
-                        id: "demo-profile",
-                        name: "Nguyễn Lâm",
-                        email: "lam.passbook@gmail.com",
-                        university: {name: "HCMUE"},
-                        is_verified: true,
-                        role: "USER",
-                        bio: "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.",
-                    }));
-                }
-            } catch (_error) {
-                // Ignore unsupported environments.
-            }
-        })();
-    </script>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/workspace.css?v=profile-v4">
 </head>

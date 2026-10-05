@@ -2,9 +2,14 @@
     "use strict";
 
     const client = global.api;
+    const authRequestTimeoutMs = 60000;
 
     async function login(credentials) {
-        const result = await client.post("/auth/login/", credentials);
+        const result = await client.post(
+            "/auth/login/",
+            credentials,
+            {timeout: authRequestTimeoutMs},
+        );
         if (result?.access && result?.refresh && result?.user) {
             global.PassbookAuth.setSession(result);
         }
@@ -28,7 +33,11 @@
 
     global.AuthAPI = Object.freeze({
         login,
-        register: (data) => client.post("/auth/register/", data),
+        register: (data) => client.post(
+            "/auth/register/",
+            data,
+            {timeout: authRequestTimeoutMs},
+        ),
         logout,
         refresh: (refresh) => client.post("/auth/token/refresh/", {refresh}),
         currentUser,

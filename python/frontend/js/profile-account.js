@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let selectedAvatarPreviewUrl = null;
     let savedAvatarUrl = null;
     let addressPage = 1;
+    let addressRequestId = 0;
 
     const renderAvatar = (container, name, imageUrl) => {
         container.replaceChildren();
@@ -34,22 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const loadProfile = async () => {
         try {
-            let profile = {};
-            const demoMode = new URL(window.location.href).searchParams.get("demo") === "1";
-            if (demoMode || globalThis.localStorage.getItem("demoProfile") === "true") {
-                profile = {
-                    id: "demo-profile",
-                    name: "Nguyễn Lâm",
-                    email: "lam.passbook@gmail.com",
-                    university: {name: "HCMUE"},
-                    avatar: "",
-                    bio: "Khám phá sách hay, kết nối cộng đồng và quản lý tài khoản một cách tiện lợi.",
-                    is_verified: true,
-                };
-                globalThis.localStorage.setItem("demoProfile", "true");
-            } else {
-                profile = await AuthAPI.profile();
-            }
+            const profile = await AuthAPI.profile();
             const profileName = profile.name || "Người dùng mới";
             profileForm.elements.name.value = profile.name || "";
             savedAvatarUrl = profile.avatar || null;
@@ -104,8 +90,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const loadAddresses = async () => {
+        const requestId = ++addressRequestId;
         try {
             const data = await UsersAPI.addresses({page: addressPage, page_size: 10});
+            if (requestId !== addressRequestId) return;
             const addresses = Array.isArray(data) ? data : data.results || [];
             const nodes = addresses.map((address) => {
                 const card = document.createElement("article");
@@ -167,6 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
             );
             addressList.replaceChildren(...nodes);
         } catch (error) {
+            if (requestId !== addressRequestId) return;
             addressList.classList.remove("report-list");
             page.querySelector("[data-address-grid]").classList.remove("has-addresses");
             const message = document.createElement("p");

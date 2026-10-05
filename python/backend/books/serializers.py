@@ -1,8 +1,12 @@
 from decimal import Decimal
+import hashlib
+import unicodedata
 from urllib.parse import urlparse
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
 from users.models import Subject
 from config.cloudinary import verify_cloudinary_image
@@ -102,6 +106,52 @@ class BookImageManifestSerializer(serializers.Serializer):
         if parsed.scheme != 'https' or not parsed.netloc:
             raise serializers.ValidationError('image_url phải là URL HTTPS hợp lệ.')
         return value
+
+
+def resolve_subject_name(name):
+    normalized_name = ' '.join(unicodedata.normalize('NFKC', name).split())
+    if not normalized_name:
+        raise ValidationError({'subject_name': 'Tên môn học không được để trống.'})
+
+    normalized_key = normalized_name.casefold()
+    matching_subjects = [
+        subject
+        for subject in Subject.objects.only('id', 'name', 'status').order_by('id')
+        if ' '.join(unicodedata.normalize('NFKC', subject.name).split()).casefold()
+        == normalized_key
+    ]
+    active_subject = next(
+        (subject for subject in matching_subjects if subject.status == 'ACTIVE'),
+        None,
+    )
+    if active_subject is not None:
+        return active_subject
+    if matching_subjects:
+        raise ValidationError({
+            'subject_name': 'Môn học này chưa được kích hoạt.',
+        })
+
+    now = timezone.now()
+    subject_code = (
+        f'USER-{hashlib.sha256(normalized_name.casefold().encode()).hexdigest()[:32].upper()}'
+    )
+    subject, _created = Subject.objects.get_or_create(
+        code=subject_code,
+        defaults={
+            'name': normalized_name,
+            'description': None,
+            'credits': None,
+            'status': 'ACTIVE',
+            'created_at': now,
+            'updated_at': now,
+        },
+    )
+    existing_key = ' '.join(unicodedata.normalize('NFKC', subject.name).split()).casefold()
+    if subject.status != 'ACTIVE' or existing_key != normalized_key:
+        raise ValidationError({
+            'subject_name': 'Không thể tạo môn học này. Vui lòng liên hệ hỗ trợ.',
+        })
+    return subject
 
 
 class BookListImageSerializer(serializers.ModelSerializer):
@@ -292,6 +342,13 @@ class BookWriteSerializer(serializers.Serializer):
         source='subject', queryset=Subject.objects.filter(status='ACTIVE'),
         required=False, allow_null=True,
     )
+    subject_name = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=False,
+        trim_whitespace=True,
+        write_only=True,
+    )
     category_id = serializers.PrimaryKeyRelatedField(
         source='category',
         queryset=Category.objects.filter(
@@ -355,6 +412,10 @@ class BookWriteSerializer(serializers.Serializer):
     pickup_note = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     def validate(self, attrs):
+        if 'subject_name' in attrs and 'subject' in attrs:
+            raise serializers.ValidationError({
+                'subject_name': 'Chỉ gửi subject_id hoặc subject_name, không gửi cả hai.',
+            })
         if self.initial_data.get('pickup_location_id') not in (None, ''):
             raise serializers.ValidationError({
                 'pickup_location_id': 'Điểm nhận riêng không thuộc schema Lite; trường này đã ngừng hỗ trợ.',
@@ -430,10 +491,10 @@ class BookWriteSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        from django.db import transaction
         from django.utils import timezone
 
         now = timezone.now()
+        subject_name = validated_data.pop('subject_name', None)
         subject = validated_data.pop('subject', None)
         category = validated_data.pop('category', None)
         isbn = validated_data.pop('isbn', None)
@@ -451,6 +512,8 @@ class BookWriteSerializer(serializers.Serializer):
         description = validated_data.get('description')
         condition = validated_data['condition_status']
         with transaction.atomic():
+            if subject_name is not None:
+                subject = resolve_subject_name(subject_name)
             public_ids = [
                 image['cloudinary_public_id']
                 for image in images or []
@@ -583,6 +646,9 @@ class BookWriteSerializer(serializers.Serializer):
         listing = sale_listing or lend_listing
         now = timezone.now()
         with transaction.atomic():
+            subject_name = validated_data.pop('subject_name', None)
+            if subject_name is not None:
+                validated_data['subject'] = resolve_subject_name(subject_name)
             image_manifest = validated_data.pop('images', None)
             has_isbn = 'isbn' in validated_data
             isbn = validated_data.pop('isbn', None)

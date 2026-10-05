@@ -64,6 +64,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                     showToast(favoriteError.message);
                 }
             }
+            if (currentRequest !== requestId) return;
             grid.replaceChildren(...(
                 books.length
                     ? books.map((book) => {

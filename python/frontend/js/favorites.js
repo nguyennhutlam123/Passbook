@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const pagination = page.querySelector("[data-favorites-pagination]");
     const error = page.querySelector("[data-favorites-error]");
     let pageNumber = Math.max(1, Number(new URLSearchParams(location.search).get("page")) || 1);
+    let loadRequestId = 0;
 
     const renderBook = (favorite) => {
         const book = favorite.book;
@@ -28,11 +29,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const load = async () => {
+        const requestId = ++loadRequestId;
         error.textContent = "";
         list.replaceChildren(PassbookCommonComponents.loadingStateElement("Đang tải sách yêu thích..."));
         pagination.replaceChildren();
         try {
             const data = await FavoritesAPI.list({page: pageNumber, page_size: 20});
+            if (requestId !== loadRequestId) return;
             const favorites = data.results || [];
             if (favorites.length) {
                 list.replaceChildren(...favorites.map(renderBook));
@@ -64,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             pagination.replaceChildren(controls);
         } catch (requestError) {
+            if (requestId !== loadRequestId) return;
             const failure = PassbookCommonComponents.emptyStateElement(
                 "Không thể tải sách yêu thích.",
                 "Kiểm tra kết nối rồi thử lại.",

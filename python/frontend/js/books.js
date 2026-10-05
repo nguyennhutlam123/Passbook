@@ -202,11 +202,30 @@ document.addEventListener("DOMContentLoaded", async () => {
             debounce = window.setTimeout(() => void loadBooks(1), 300);
         });
     }
+    const filterPanel = document.querySelector(".filter-panel");
+    const filterToggle = document.querySelector("[data-filter-open]");
+    const setFiltersOpen = (open) => {
+        filterPanel?.classList.toggle("is-open", open);
+        filterToggle?.setAttribute("aria-expanded", String(open));
+        const indicator = filterToggle?.querySelector("span");
+        if (indicator) indicator.textContent = open ? "⌃" : "⌄";
+    };
+    const closeFilters = (restoreFocus = false) => {
+        if (!filterPanel?.classList.contains("is-open")) return;
+        setFiltersOpen(false);
+        if (restoreFocus) filterToggle?.focus();
+    };
+    const filterClose = document.querySelector("[data-filter-close]");
+
     document.querySelector("[data-apply-filters]")?.addEventListener("click", () => {
         window.clearTimeout(debounce);
         void loadBooks(1);
+        closeFilters(true);
     });
-    document.querySelector("[data-search-submit]")?.addEventListener("click", () => void loadBooks(1));
+    document.querySelector("[data-search-submit]")?.addEventListener("click", () => {
+        window.clearTimeout(debounce);
+        void loadBooks(1);
+    });
     search?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             event.preventDefault();
@@ -220,25 +239,40 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.querySelector("[data-reset-empty]")?.addEventListener("click", () => {
         window.location.assign(catalogPage());
     });
-    const filterPanel = document.querySelector(".filter-panel");
-    const filterToggle = document.querySelector("[data-filter-open]");
-    const setFiltersOpen = (open) => {
-        filterPanel?.classList.toggle("is-open", open);
-        filterToggle?.setAttribute("aria-expanded", String(open));
-        if (filterToggle) filterToggle.querySelector("span").textContent = open ? "⌃" : "⌄";
-    };
     filterToggle?.addEventListener("click", () =>
         setFiltersOpen(!filterPanel?.classList.contains("is-open")),
     );
-    document.querySelector("[data-filter-close]")?.addEventListener("click", () =>
-        setFiltersOpen(false),
-    );
-    try {
-        await loadCatalogOptions();
-        await loadBooks(page);
-    } catch (error) {
+    filterClose?.addEventListener("click", () => closeFilters(true));
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeFilters(true);
+    });
+    document.addEventListener("click", (event) => {
+        if (
+            filterPanel?.classList.contains("is-open")
+            && !filterPanel.contains(event.target)
+            && !filterToggle?.contains(event.target)
+        ) {
+            closeFilters();
+        }
+    });
+    const catalogOptionsTask = loadCatalogOptions().catch((error) => {
         document.querySelector("[data-filter-error]").textContent =
             `Không thể tải bộ lọc. ${error.message}`;
-        await loadBooks(page);
+    });
+    const needsCatalogOptions = [
+        "category_slug",
+        "category_id",
+        "language_id",
+    ].some((key) => params.has(key));
+    try {
+        if (needsCatalogOptions) {
+            await catalogOptionsTask;
+            await loadBooks(page);
+        } else {
+            await Promise.all([catalogOptionsTask, loadBooks(page)]);
+        }
+    } catch (error) {
+        document.querySelector("[data-filter-error]").textContent =
+            `Không thể tải sách. ${error.message}`;
     }
 });

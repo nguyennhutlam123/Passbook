@@ -10,6 +10,11 @@ document.addEventListener("DOMContentLoaded", () => {
     let editing = null;
     let originalImages = [];
     let imagesReady = Promise.resolve();
+    let imageProcessing = Promise.resolve();
+    let catalogOptionsReady = false;
+    let catalogOptionsPromise = null;
+    let isSubmitting = false;
+    let subjectOptions = [];
 
     try {
         editing = JSON.parse(localStorage.getItem("editingListing") || "null");
@@ -103,27 +108,86 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     };
 
-    BooksAPI.options().then((options) => {
-        populateOptions(
-            form.elements.subject_id,
-            "Chọn môn học",
-            options.subjects,
-            (subject) => `${subject.name} (${subject.code})`,
+    const subjectInput = form.elements.subject_name;
+    const subjectIdInput = form.elements.subject_id;
+    const subjectDatalist = form.querySelector("#book-subject-options");
+    const retryCatalogOptions = form.querySelector("[data-retry-catalog-options]");
+    const normalizedSubjectName = (name) => name
+        .normalize("NFKC")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase();
+    const updateSubjectId = () => {
+        const enteredName = normalizedSubjectName(subjectInput.value);
+        const matchingSubject = subjectOptions.find(
+            (subject) => normalizedSubjectName(subject.name) === enteredName,
         );
-        populateOptions(
-            form.elements.category_id,
-            "Chọn danh mục",
-            options.categories,
-            (category) => category.name,
-        );
-        if (editing) {
-            form.elements.subject_id.value = String(editing.subject?.id || "");
-            form.elements.category_id.value = String(editing.category?.id || "");
-        }
-    }).catch((error) => {
-        setError("subject_id", "Không thể tải danh sách môn học. Vui lòng tải lại trang.");
-        showToast(`Không thể tải dữ liệu danh mục: ${error.message}`);
+        subjectIdInput.value = matchingSubject ? String(matchingSubject.id) : "";
+    };
+    subjectInput.addEventListener("input", updateSubjectId);
+
+    const loadCatalogOptions = () => {
+        if (catalogOptionsPromise) return catalogOptionsPromise;
+        catalogOptionsReady = false;
+        submitButton.disabled = true;
+        retryCatalogOptions.hidden = true;
+        catalogOptionsPromise = BooksAPI.options().then((options) => {
+            const supportedSlugs = [
+                "tieu-thuyet",
+                "tho",
+                "kich",
+                "sach-giao-khoa",
+                "giao-trinh",
+                "tai-lieu",
+                "truyen-tranh",
+            ];
+            const categoriesBySlug = new Map(
+                (Array.isArray(options.categories) ? options.categories : [])
+                    .map((category) => [category.slug, category]),
+            );
+            const categories = supportedSlugs.map((slug) => categoriesBySlug.get(slug));
+            if (categories.some((category) => !category || !category.id || !category.name)) {
+                throw new Error("Danh mục chưa tải đầy đủ.");
+            }
+            subjectOptions = Array.isArray(options.subjects)
+                ? options.subjects.filter((subject) => subject?.id && subject.name)
+                : [];
+            subjectDatalist.replaceChildren(...subjectOptions.map((subject) => {
+                const option = document.createElement("option");
+                option.value = subject.name;
+                option.label = subject.code || subject.name;
+                return option;
+            }));
+            populateOptions(
+                form.elements.category_id,
+                "Chọn danh mục",
+                categories,
+                (category) => category.name,
+            );
+            if (editing) {
+                subjectInput.value = editing.subject?.name || "";
+                form.elements.category_id.value = String(editing.category?.id || "");
+                updateSubjectId();
+            }
+            catalogOptionsReady = true;
+            setError("category_id");
+            return true;
+        }).catch((error) => {
+            setError("category_id", "Không thể tải đầy đủ danh mục. Thử lại để tiếp tục.");
+            retryCatalogOptions.hidden = false;
+            showToast(`Không thể tải danh mục: ${error.message}`);
+            return false;
+        }).finally(() => {
+            catalogOptionsPromise = null;
+            submitButton.disabled = !catalogOptionsReady;
+        });
+        return catalogOptionsPromise;
+    };
+    retryCatalogOptions.addEventListener("click", () => {
+        void loadCatalogOptions();
     });
+    submitButton.disabled = true;
+    void loadCatalogOptions();
 
     if (editing) {
         Object.entries({
@@ -141,7 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
             isbn: editing.isbn,
             condition_description: editing.condition_description,
             publication_year: editing.publication_year,
-            subject_id: editing.subject?.id,
+            subject_name: editing.subject?.name,
             category_id: editing.category?.id,
         }).forEach(([name, value]) => {
             if (value !== undefined && value !== null && form.elements[name]) {
@@ -212,49 +276,70 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    imageFileInput?.addEventListener("change", async () => {
-        setError("images");
+    imageFileInput?.addEventListener("change", () => {
         const selectedFiles = Array.from(imageFileInput.files || []);
         imageFileInput.value = "";
-        for (const file of selectedFiles) {
-            const validationError = await validateImageFile(file);
-            if (validationError) {
-                setError("images", validationError);
-                continue;
+        imageProcessing = imageProcessing.then(async () => {
+            setError("images");
+            for (const file of selectedFiles) {
+                const validationError = await validateImageFile(file);
+                if (validationError) {
+                    setError("images", validationError);
+                    continue;
+                }
+                if (imageEntries.length >= maximumImages) {
+                    setError("images", `Mỗi tin đăng được đăng tối đa ${maximumImages} ảnh.`);
+                    break;
+                }
+                imageEntries.push({
+                    kind: "new",
+                    file,
+                    previewUrl: URL.createObjectURL(file),
+                    is_primary: imageEntries.length === 0,
+                });
             }
-            if (imageEntries.length >= maximumImages) {
-                setError("images", `Mỗi tin đăng được đăng tối đa ${maximumImages} ảnh.`);
-                break;
-            }
-            imageEntries.push({
-                kind: "new",
-                file,
-                previewUrl: URL.createObjectURL(file),
-                is_primary: imageEntries.length === 0,
-            });
-        }
-        renderImages();
+            renderImages();
+        }).catch((error) => {
+            setError("images", `Không thể xử lý ảnh đã chọn: ${error.message}`);
+        });
     });
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (submitButton.disabled) return;
+        if (isSubmitting || submitButton.disabled || !catalogOptionsReady) return;
+        isSubmitting = true;
+        submitButton.disabled = true;
+        submitButton.textContent = editing ? "Đang cập nhật..." : "Đang đăng...";
+        imageFileInput.disabled = true;
+        previews.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+        const releaseSubmit = () => {
+            isSubmitting = false;
+            imageFileInput.disabled = false;
+            previews.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+            submitButton.disabled = !catalogOptionsReady;
+            submitButton.textContent = editing ? "Cập nhật tin" : "Đăng tin";
+        };
         try {
-            await imagesReady;
+            await Promise.all([imagesReady, imageProcessing]);
         } catch (error) {
             showToast(`Không thể tải ảnh hiện tại: ${error.message}`);
+            releaseSubmit();
             return;
         }
 
         const data = new FormData(form);
         [
-            "title", "subject_id", "price", "rental_fee", "max_days",
-            "shipping_paid_by", "return_method", "condition", "description",
+            "title", "subject_name", "category_id", "price", "rental_fee",
+            "max_days", "shipping_paid_by", "return_method", "condition",
+            "description",
         ].forEach((field) => setError(field));
         const errors = {};
         const selectedType = transactionType();
         if (!data.get("title")?.toString().trim()) errors.title = "Tên sách không được để trống.";
-        if (!Number(data.get("subject_id"))) errors.subject_id = "Vui lòng chọn môn học.";
+        if (!data.get("subject_name")?.toString().trim()) {
+            errors.subject_name = "Vui lòng nhập môn học.";
+        }
+        if (!Number(data.get("category_id"))) errors.category_id = "Vui lòng chọn danh mục.";
         if (selectedType === "BUY" && (!Number(data.get("price")) || Number(data.get("price")) <= 0)) {
             errors.price = "Giá bán phải lớn hơn 0.";
         }
@@ -275,10 +360,11 @@ document.addEventListener("DOMContentLoaded", () => {
             errors.images = `Mỗi tin đăng được đăng tối đa ${maximumImages} ảnh.`;
         }
         Object.entries(errors).forEach(([field, message]) => setError(field, message));
-        if (Object.keys(errors).length) return;
+        if (Object.keys(errors).length) {
+            releaseSubmit();
+            return;
+        }
 
-        submitButton.disabled = true;
-        submitButton.textContent = editing ? "Đang cập nhật..." : "Đang đăng...";
         const payload = {
             listing_type: selectedType,
             title: data.get("title").toString().trim(),
@@ -290,9 +376,13 @@ document.addEventListener("DOMContentLoaded", () => {
             isbn: data.get("isbn")?.toString().trim() || null,
             condition_description: data.get("condition_description")?.toString().trim() || null,
             publication_year: data.get("publication_year") ? Number(data.get("publication_year")) : null,
-            subject_id: Number(data.get("subject_id")),
-            category_id: data.get("category_id") ? Number(data.get("category_id")) : null,
+            category_id: Number(data.get("category_id")),
         };
+        if (Number(data.get("subject_id"))) {
+            payload.subject_id = Number(data.get("subject_id"));
+        } else {
+            payload.subject_name = data.get("subject_name").toString().trim();
+        }
         if (selectedType === "BUY") {
             payload.price = data.get("price");
         } else {
@@ -380,8 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             showToast(`Lỗi khi ${operation}: ${error.message}`);
         } finally {
-            submitButton.disabled = false;
-            submitButton.textContent = editing ? "Cập nhật tin" : "Đăng tin";
+            releaseSubmit();
         }
     });
 
@@ -393,6 +482,7 @@ document.addEventListener("DOMContentLoaded", () => {
         editing = null;
         originalImages = [];
         imagesReady = Promise.resolve();
+        imageProcessing = Promise.resolve();
         localStorage.removeItem("editingListing");
         form.reset();
         updateTransactionFields();
@@ -400,7 +490,7 @@ document.addEventListener("DOMContentLoaded", () => {
         previews.replaceChildren();
         form.hidden = false;
         success.hidden = true;
-        submitButton.disabled = false;
+        submitButton.disabled = !catalogOptionsReady;
         submitButton.textContent = "Đăng tin";
     });
 });

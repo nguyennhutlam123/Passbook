@@ -33,6 +33,7 @@ from .serializers import (
     BookListSerializer,
     BookWriteSerializer,
     FavoriteBookSerializer,
+    resolve_subject_name,
 )
 from .services import (
     FakePaymentProvider,
@@ -66,7 +67,7 @@ from .commerce_api_views import (
 from .public_profile_api_views import PublicUserListingsView
 from .api_views import BookDetailView, BookImageListView, prefetch_book_reviews
 from .request_api_views import BookIntentSummaryView, BookRequestDetailView
-from users.models import OtpVerification
+from users.models import OtpVerification, Subject
 
 
 class BookCategoryTaxonomyTests(SimpleTestCase):
@@ -104,6 +105,80 @@ class BookCategoryTaxonomyTests(SimpleTestCase):
             slug='legacy-category',
             status='ACTIVE',
         )))
+
+
+class BookSubjectNameTests(SimpleTestCase):
+    def test_write_serializer_accepts_a_subject_name_without_catalog_ids(self):
+        serializer = BookWriteSerializer(data={
+            'title': 'Physics textbook',
+            'condition_status': 'good',
+            'price': '10000',
+            'subject_name': '  Vật   lý  ',
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data['subject_name'], 'Vật   lý')
+
+    def test_active_subject_name_is_reused_case_insensitively(self):
+        subject = SimpleNamespace(id=12, name='Vật lý', status='ACTIVE')
+        subjects = Mock()
+        subjects.order_by.return_value = [subject]
+
+        with patch('books.serializers.Subject.objects.only', return_value=subjects) as lookup:
+            resolved = resolve_subject_name('  VẬT   LÝ  ')
+
+        self.assertIs(resolved, subject)
+        lookup.assert_called_once_with('id', 'name', 'status')
+
+    def test_subject_name_with_different_accents_is_not_reused(self):
+        subject = SimpleNamespace(id=12, name='Hoa', status='ACTIVE')
+        created_subject = SimpleNamespace(id=15, name='Hóa', status='ACTIVE')
+        subjects = Mock()
+        subjects.order_by.return_value = [subject]
+
+        with (
+            patch('books.serializers.Subject.objects.only', return_value=subjects),
+            patch(
+                'books.serializers.Subject.objects.get_or_create',
+                return_value=(created_subject, True),
+            ) as get_or_create,
+        ):
+            resolved = resolve_subject_name('Hóa')
+
+        self.assertIs(resolved, created_subject)
+        self.assertEqual(get_or_create.call_args.kwargs['defaults']['name'], 'Hóa')
+
+    def test_inactive_subject_name_is_not_duplicated(self):
+        subjects = Mock()
+        subjects.order_by.return_value = [
+            SimpleNamespace(id=13, name='Disabled subject', status='INACTIVE'),
+        ]
+
+        with patch('books.serializers.Subject.objects.only', return_value=subjects):
+            with self.assertRaises(ValidationError):
+                resolve_subject_name('Disabled subject')
+
+    def test_new_subject_uses_a_deterministic_code(self):
+        subject = SimpleNamespace(
+            id=15,
+            name='Vật lý',
+            status='ACTIVE',
+        )
+        subjects = Mock()
+        subjects.order_by.return_value = []
+
+        with (
+            patch('books.serializers.Subject.objects.only', return_value=subjects),
+            patch(
+                'books.serializers.Subject.objects.get_or_create',
+                return_value=(subject, True),
+            ) as get_or_create,
+        ):
+            resolved = resolve_subject_name('Vật lý')
+
+        self.assertIs(resolved, subject)
+        self.assertEqual(get_or_create.call_args.kwargs['defaults']['name'], 'Vật lý')
+        self.assertTrue(get_or_create.call_args.kwargs['code'].startswith('USER-'))
 
 
 class BookReviewPrefetchTests(SimpleTestCase):

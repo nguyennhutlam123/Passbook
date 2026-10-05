@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.http import JsonResponse
 from django.urls import path
 
@@ -36,8 +37,24 @@ def health_check(request):
     })
 
 
+def otp_status(request):
+    return JsonResponse({'otp_enabled': settings.OTP_ENABLED})
+
+
+def otp_unavailable(request):
+    return JsonResponse(
+        {'detail': 'OTP and password reset are temporarily unavailable.'},
+        status=503,
+    )
+
+
 urlpatterns = [
     path('health/', health_check, name='health-check'),
+    path('auth/otp-status/', otp_status, name='otp-status'),
+    path('auth/verify-otp/', otp_unavailable, name='otp-verify-disabled'),
+    path('auth/resend-otp/', otp_unavailable, name='otp-resend-disabled'),
+    path('auth/forgot-password/', otp_unavailable, name='forgot-password-disabled'),
+    path('auth/reset-password/', otp_unavailable, name='reset-password-disabled'),
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/authenticated-user/', AuthenticatedUserView.as_view(), name='authenticated-user'),

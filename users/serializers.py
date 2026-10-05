@@ -14,6 +14,8 @@ class RegisterSerializer(serializers.Serializer):
         source='university',
         queryset=University.objects.all(),
         write_only=True,
+        required=False,
+        allow_null=True,
     )
     phone = serializers.CharField(max_length=20, allow_blank=True, required=False)
 

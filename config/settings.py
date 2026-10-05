@@ -28,6 +28,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'passbook-development-only-change-me')
 DEBUG = True
 
 ALLOWED_HOSTS = []
+OTP_ENABLED = os.environ.get('OTP_ENABLED', 'false').lower() == 'true'
 
 
 # Application definition

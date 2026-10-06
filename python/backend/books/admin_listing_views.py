@@ -120,6 +120,28 @@ class AdminListingModerationActionView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
 
     @transaction.atomic
+    def delete(self, request, listing_type, listing_id):
+        model, _owner_field, _payload_type = _listing_type(listing_type)
+        listing = get_object_or_404(
+            model.objects.select_for_update(),
+            pk=listing_id,
+        )
+        protected_statuses = (
+            ('RESERVED', 'SOLD')
+            if model is SaleListing
+            else ('RESERVED', 'ON_LOAN')
+        )
+        if listing.status in protected_statuses:
+            raise ValidationError({
+                'status': 'Không thể xóa tin đang có giao dịch hoặc đang được giữ chỗ.',
+            })
+
+        listing.status = 'CLOSED'
+        listing.updated_at = timezone.now()
+        listing.save(update_fields=('status', 'updated_at'))
+        return Response(status=204)
+
+    @transaction.atomic
     def patch(self, request, listing_type, listing_id):
         model, _owner_field, _payload_type = _listing_type(listing_type)
         action = request.data.get('action')

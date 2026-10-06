@@ -290,7 +290,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 } else {
                     const empty = PassbookCommonComponents.emptyStateElement(
                         "Chưa có đơn hàng.",
-                        "Các đơn mua và mượn sách sẽ xuất hiện tại đây.",
                     );
                     const browse = document.createElement("a");
                     browse.className = "button button-primary";

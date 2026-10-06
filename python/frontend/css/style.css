@@ -454,6 +454,12 @@ h2 {
     margin-bottom: 1.5rem;
 }
 
+.sell-form__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
 .transaction-choice {
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius);
@@ -2247,26 +2253,77 @@ textarea:focus {
     .book-grid,
     .book-grid--storefront,
     .catalog-results .book-grid {
-        gap: 0.7rem;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .book-card,
+    .book-grid--storefront .book-card {
+        align-items: stretch;
+        display: grid;
+        grid-template-columns: minmax(6.25rem, 0.38fr) minmax(0, 1fr);
+        grid-template-rows: minmax(11.5rem, auto);
+    }
+
+    .book-card__cover-link {
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+    }
+
+    .book-card__cover,
+    .book-card__image {
+        height: 100%;
     }
 
     .book-card__image {
-        aspect-ratio: 0.78;
+        aspect-ratio: auto;
+        object-fit: contain;
+        object-position: center top;
     }
 
     .book-card__body {
+        align-content: start;
         gap: 0.35rem;
-        min-height: 11.25rem;
-        padding: 0.7rem;
+        grid-column: 2;
+        grid-row: 1;
+        min-height: 0;
+        min-width: 0;
+        padding: 0.75rem;
     }
 
     .book-card__title {
-        font-size: 0.9rem;
+        font-size: 0.95rem;
+        line-height: 1.25;
+    }
+
+    .book-card__subject {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        overflow-wrap: anywhere;
     }
 
     .book-card__body .price {
-        font-size: 0.95rem;
+        font-size: 1rem;
+    }
+
+    .book-card__body .seller-line {
+        margin-top: 0.2rem;
+    }
+
+    .book-card__body > .button {
+        font-size: 0.82rem;
+        min-height: 2.5rem;
+        padding: 0.5rem;
+    }
+
+    .book-card__cover .favorite-button {
+        height: 2.25rem;
+        right: 0.45rem;
+        top: 0.45rem;
+        width: 2.25rem;
     }
 
     .category-grid {

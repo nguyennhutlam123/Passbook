@@ -19,7 +19,6 @@
             <p class="workspace-total" data-cart-total></p>
             <form class="workspace-checkout" data-checkout-form hidden>
                 <h2 data-checkout-heading>Thông tin đặt hàng</h2>
-                <p class="caption" data-borrow-checkout-note hidden>Giỏ hàng dùng chung cho sách mua và sách mượn. Phiếu mượn thanh toán COD khi nhận sách; Admin xác nhận đã thu tiền và giao thành công thì phiếu mới chuyển sang đang mượn. Khi trả, tạo đơn trả sách để Admin theo dõi vận chuyển; phí trễ (nếu có) chốt khi Admin xác nhận đã nhận lại sách.</p>
                 <div data-checkout-summary><p class="loading-state">Đang tính tiền từ server...</p></div>
                 <div class="form-group"><label class="form-label" for="checkout-recipient">Người nhận</label><input class="form-control" id="checkout-recipient" name="recipient_name" required maxlength="255"></div>
                 <div class="form-group"><label class="form-label" for="checkout-phone">Số điện thoại</label><input class="form-control" id="checkout-phone" name="phone" required maxlength="30"></div>
@@ -30,9 +29,6 @@
                     <label class="form-label" for="checkout-payment-outcome">Kết quả Fake Payment (local/test)</label>
                     <select class="form-control" id="checkout-payment-outcome" name="payment_outcome"><option value="SUCCESS">Thành công</option><option value="FAILURE">Thất bại</option><option value="CANCEL">Hủy</option></select>
                 </div>
-                <p class="caption" data-bank-transfer-note hidden>Chuyển khoản sẽ ở trạng thái chờ Admin xác minh. Chưa có cấu hình ngân hàng được cung cấp; không hiển thị thông tin tài khoản giả.</p>
-                <p class="caption" data-cod-note hidden>COD sẽ giữ trạng thái chờ thanh toán cho tới khi Shipment được đánh dấu DELIVERED; backend tự động ghi nhận Payment là PAID.</p>
-                <p class="caption" data-borrow-cod-note hidden>Yêu cầu mượn được tạo ngay; khoản COD sẽ được ghi nhận khi Admin cập nhật trạng thái giao thành công.</p>
                 <div class="modal-actions"><button class="button button-outline" type="button" data-checkout-cancel>Hủy</button><button class="button button-primary" type="submit" data-checkout-submit>Đặt hàng</button></div>
             </form>
             <div class="success-panel" data-checkout-success hidden></div>
@@ -43,6 +39,6 @@
     <script src="js/core/storage.js"></script><script src="js/core/errors.js"></script><script src="js/core/auth.js"></script><script src="js/core/router.js"></script><script src="js/core/guards.js"></script>
     <script src="js/components/common/common.js?v=borrow-workflow-20261005"></script><script src="js/components/commerce/cards.js?v=borrow-admin-delivery-20261005"></script>
     <script src="js/api.js"></script><script src="js/api/utils.js"></script><script src="js/api/auth-api.js"></script><script src="js/api/orders-api.js?v=borrow-workflow-20261005"></script><script src="js/api/notifications-api.js"></script>
-    <script src="js/main.js?v=borrow-return-overdue-20261005"></script><script src="js/workspace.js?v=borrow-return-overdue-20261005"></script>
+    <script src="js/main.js?v=borrow-return-overdue-20261005"></script><script src="js/workspace.js?v=checkout-empty-state-20261006"></script>
 </body>
 </html>

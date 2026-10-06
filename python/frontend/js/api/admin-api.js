@@ -71,6 +71,10 @@
                 `/admin/dashboard/listings/${path(listingType)}/${path(listingId)}/moderation/`,
                 data,
             ),
+        deleteListing: (listingType, listingId) =>
+            client.delete(
+                `/admin/dashboard/listings/${path(listingType)}/${path(listingId)}/moderation/`,
+            ),
         users: (query = {}) =>
             client.get(global.PassbookApiUtils.withQuery("/admin/users/", query)),
         reports: (query = {}) =>

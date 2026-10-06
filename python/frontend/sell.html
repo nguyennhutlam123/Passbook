@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Đăng bán - PassBook</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=stale-listing-recovery-20261006">
 </head>
 <body>
     <header class="site-header" data-site-header></header>
@@ -134,7 +134,12 @@
                     <div class="upload-previews" data-upload-previews></div>
                 </div>
             </div>
-            <button class="button button-primary" type="submit">Đăng tin</button>
+            <div class="sell-form__actions">
+                <button class="button button-primary" type="submit">Đăng tin</button>
+                <button class="button button-outline" type="button" data-continue-as-new hidden>
+                    Tạo tin mới từ thông tin hiện tại
+                </button>
+            </div>
         </form>
         <section class="success-panel" data-sell-success hidden>
             <span class="success-panel__icon" aria-hidden="true">✓</span>
@@ -159,6 +164,6 @@
     <script src="js/api/books-api.js"></script>
     <script src="js/api/notifications-api.js"></script>
     <script src="js/main.js?v=buy-now-type-20261005"></script>
-    <script src="js/sell.js?v=listing-review-20261005"></script>
+    <script src="js/sell.js?v=stale-listing-recovery-20261006"></script>
 </body>
 </html>

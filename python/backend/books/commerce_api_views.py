@@ -16,13 +16,21 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from users.models import User, UserAddress
+from users.models import (
+    Faculty,
+    Major,
+    Subject,
+    University,
+    User,
+    UserAddress,
+)
 from notifications.services import (
     notify_borrow_order_parties,
     notify_order_parties,
 )
 from .models import (
     Book,
+    BookEdition,
     BookImage,
     BookIdentifier,
     BookRequest,
@@ -31,8 +39,10 @@ from .models import (
     BorrowOrder,
     Cart,
     CartItem,
+    BookWork,
     BookWorkSubject,
     CheckoutGroup,
+    Category,
     LendListing,
     Order,
     Payment,
@@ -66,6 +76,7 @@ from .shipment_services import (
     validate_shipment_transition,
 )
 from .pagination import BookPagination
+from .search import indexed_icontains
 from .api_views import prefetch_book_reviews
 
 
@@ -1058,33 +1069,71 @@ class LendListingListCreateView(APIView):
         params = request.query_params
         search = (params.get('search') or '').strip()
         if search:
-            identifier_match = BookIdentifier.objects.filter(
-                book_edition_id=OuterRef('book__book_edition_id'),
-                identifier_value__icontains=search,
-            )
-            subject_match = BookWorkSubject.objects.filter(
-                book_work_id=OuterRef('book__book_edition__book_work_id'),
-            ).filter(
-                Q(subject__name__icontains=search)
-                | Q(subject__code__icontains=search),
-            )
-            queryset = queryset.annotate(
-                _subject_match=Exists(subject_match),
-                _identifier_match=Exists(identifier_match),
-            ).filter(
-                Q(title__icontains=search)
-                | Q(description__icontains=search)
-                | Q(book__book_edition__book_work__title__icontains=search)
-                | Q(book__book_edition__book_work__description__icontains=search)
-                | Q(book__book_edition__book_work__author_name__icontains=search)
-                | Q(book__book_edition__edition_name__icontains=search)
-                | Q(book__book_edition__publisher_name__icontains=search)
-                | Q(book__book_edition__book_work__category__name__icontains=search)
-                | Q(lender__university__name__icontains=search)
-                | Q(lender__faculty__name__icontains=search)
-                | Q(lender__major__name__icontains=search)
-                | Q(_subject_match=True)
-                | Q(_identifier_match=True),
+            listing_ids = indexed_icontains(
+                LendListing.objects.filter(
+                    status='ACTIVE',
+                    book__status='AVAILABLE',
+                ).filter(
+                    Q(expires_at__isnull=True)
+                    | Q(expires_at__gt=timezone.now()),
+                ),
+                ('title', 'description'),
+                search,
+            ).values('id')
+            work_ids = indexed_icontains(
+                BookWork.objects.all(),
+                ('title', 'description', 'author_name'),
+                search,
+            ).values('id')
+            edition_ids = indexed_icontains(
+                BookEdition.objects.all(),
+                ('edition_name', 'publisher_name', 'description'),
+                search,
+                exact_fields=('edition_name', 'publisher_name'),
+            ).values('id')
+            category_ids = indexed_icontains(
+                Category.objects.all(),
+                ('name',),
+                search,
+            ).values('id')
+            university_ids = indexed_icontains(
+                University.objects.all(),
+                ('name',),
+                search,
+            ).values('id')
+            faculty_ids = indexed_icontains(
+                Faculty.objects.all(),
+                ('name',),
+                search,
+            ).values('id')
+            major_ids = indexed_icontains(
+                Major.objects.all(),
+                ('name',),
+                search,
+            ).values('id')
+            subject_ids = indexed_icontains(
+                Subject.objects.all(),
+                ('name', 'code'),
+                search,
+            ).values('id')
+            subject_work_ids = BookWorkSubject.objects.filter(
+                subject_id__in=Subquery(subject_ids),
+            ).values('book_work_id')
+            identifier_edition_ids = indexed_icontains(
+                BookIdentifier.objects.all(),
+                ('identifier_value',),
+                search,
+            ).values('book_edition_id')
+            queryset = queryset.filter(
+                Q(pk__in=Subquery(listing_ids))
+                | Q(book__book_edition__book_work_id__in=Subquery(work_ids))
+                | Q(book__book_edition_id__in=Subquery(edition_ids))
+                | Q(book__book_edition__book_work__category_id__in=Subquery(category_ids))
+                | Q(book__book_edition__book_work_id__in=Subquery(subject_work_ids))
+                | Q(lender__university_id__in=Subquery(university_ids))
+                | Q(lender__faculty_id__in=Subquery(faculty_ids))
+                | Q(lender__major_id__in=Subquery(major_ids))
+                | Q(book__book_edition_id__in=Subquery(identifier_edition_ids))
             )
         subject_id = _query_integer(params, 'subject_id')
         if subject_id is not None:
@@ -1193,8 +1242,16 @@ class LendListingListCreateView(APIView):
                 'price': 'min_price không được lớn hơn max_price.',
             })
         sort_options = {
-            'newest': ('-created_at', '-id'),
-            'oldest': ('created_at', 'id'),
+            'newest': (
+                F('published_at').desc(nulls_last=True),
+                '-id',
+                '-created_at',
+            ),
+            'oldest': (
+                F('published_at').asc(nulls_last=True),
+                'id',
+                'created_at',
+            ),
             'price_asc': ('rental_fee', 'id'),
             'price_desc': ('-rental_fee', '-id'),
         }

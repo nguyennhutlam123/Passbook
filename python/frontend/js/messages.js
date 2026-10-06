@@ -30,7 +30,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (!conversations.length && pageNumber === 1) {
             const empty = PassbookCommonComponents.emptyStateElement(
                 "Chưa có cuộc hội thoại.",
-                "Khi bạn liên hệ người bán hoặc người mua, cuộc trò chuyện riêng sẽ xuất hiện tại đây.",
             );
             const browse = document.createElement("a");
             browse.className = "button button-primary";

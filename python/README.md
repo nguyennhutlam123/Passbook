@@ -100,6 +100,8 @@ lớn. API bộ lọc catalog được cache 5 phút để tránh đọc lại d
 - **Commerce:** cart, checkout, sale/borrow orders, payment simulation, shipping/tracking,
   return/refund.
 - **Borrow:** tin cho mượn mới ở trạng thái `PENDING` và chỉ công khai sau khi Admin duyệt.
+  Danh sách công khai và khu mượn trên trang chủ ưu tiên tin theo `published_at`, để tin vừa
+  được duyệt xuất hiện trước cả những tin cũ được tạo lâu hơn.
   Người mượn thêm tin đang hoạt động vào cart, chọn ngày bắt đầu/ngày trả và checkout để tạo
   `Order` cùng `BorrowOrder`. Phiếu mượn dùng COD khi giao; backend khóa listing và Book, tự
   tạo Shipment và giữ phiếu ở `PENDING`. Chỉ khi Admin cập nhật giao thành công (xác nhận đã
@@ -128,6 +130,13 @@ chuyển hiện là 0 vì Lite schema/project chưa có quy tắc tính phí gia
 BUY và BORROW là hai listing model riêng đã có trong Lite schema; không thêm cột hay migration.
 Tin BUY và BORROW đều cần Admin duyệt trước khi xuất hiện công khai. BORROW listing không xuất
 hiện trong trang Mua; sau checkout, Admin tiếp nhận và điều phối cả lượt giao lẫn lượt trả sách.
+
+Tìm kiếm `/api/books/` và `/api/lend-listings/` dùng ngram FULLTEXT làm bộ lọc ứng viên,
+sau đó xác minh lại bằng `icontains` để giữ nguyên kết quả tìm substring. Tìm kiếm ngắn dưới
+hai ký tự hoặc môi trường MariaDB dùng `icontains` trực tiếp. Với database Lite MySQL đã có sẵn,
+áp dụng `docs/database/passbook_v1.2_lite_ngram_search_upgrade.sql` trước khi triển khai backend;
+schema mới cần các index ngram tương ứng trong `passbook_v1.2_lite.sql`. `/api/catalog/options/`
+đã cache 5 phút; các index B-tree hiện có phục vụ các điều kiện lọc/sắp xếp của hai endpoint.
 
 Admin duyệt hoặc từ chối tin BUY và BORROW trong `Admin Dashboard > Kiểm duyệt tin`; hai loại
 tin có danh sách riêng và chỉ listing `PENDING` mới có thể được xử lý. Khi người đăng sửa một tin

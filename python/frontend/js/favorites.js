@@ -39,7 +39,6 @@ document.addEventListener("DOMContentLoaded", () => {
             } else {
                 const empty = PassbookCommonComponents.emptyStateElement(
                     "Bạn chưa lưu sách yêu thích nào.",
-                    "Khám phá sách và lưu những cuốn bạn quan tâm.",
                 );
                 const explore = document.createElement("a");
                 explore.className = "button button-primary";

@@ -102,6 +102,13 @@ class AdminListingModerationTests(SimpleTestCase):
                 ),
                 {'listing_type': 'sale', 'listing_id': 12},
             ),
+            (
+                AdminListingModerationActionView.as_view(),
+                self.factory.delete(
+                    '/api/admin/dashboard/listings/sale/12/moderation/',
+                ),
+                {'listing_type': 'sale', 'listing_id': 12},
+            ),
         )
         for view, request, kwargs in requests:
             with self.subTest(view=view):
@@ -199,3 +206,87 @@ class AdminListingModerationTests(SimpleTestCase):
         listing.save.assert_called_once_with(
             update_fields=('status', 'published_at', 'updated_at'),
         )
+
+    def test_admin_delete_closes_sale_and_borrow_listings(self):
+        for listing_type, model in (
+            ('sale', SaleListing),
+            ('borrow', LendListing),
+        ):
+            with self.subTest(listing_type=listing_type):
+                listing = SimpleNamespace(
+                    status='ACTIVE',
+                    updated_at=None,
+                    save=Mock(),
+                )
+                raw_request = self.factory.delete(
+                    f'/api/admin/dashboard/listings/{listing_type}/12/moderation/',
+                )
+                force_authenticate(raw_request, user=self.admin)
+                view = AdminListingModerationActionView()
+                request = view.initialize_request(raw_request)
+                queryset = Mock()
+                queryset.get.return_value = listing
+
+                with patch.object(
+                    model.objects,
+                    'select_for_update',
+                    return_value=queryset,
+                ), patch(
+                    'books.admin_listing_views.get_object_or_404',
+                    return_value=listing,
+                ):
+                    response = AdminListingModerationActionView.delete.__wrapped__(
+                        view,
+                        request,
+                        listing_type,
+                        12,
+                    )
+
+                self.assertEqual(response.status_code, 204)
+                self.assertEqual(listing.status, 'CLOSED')
+                self.assertIsNotNone(listing.updated_at)
+                listing.save.assert_called_once_with(
+                    update_fields=('status', 'updated_at'),
+                )
+
+    def test_admin_cannot_delete_listings_with_active_transactions(self):
+        for listing_type, model, protected_status in (
+            ('sale', SaleListing, 'RESERVED'),
+            ('sale', SaleListing, 'SOLD'),
+            ('borrow', LendListing, 'RESERVED'),
+            ('borrow', LendListing, 'ON_LOAN'),
+        ):
+            with self.subTest(
+                listing_type=listing_type,
+                protected_status=protected_status,
+            ):
+                listing = SimpleNamespace(
+                    status=protected_status,
+                    updated_at=None,
+                    save=Mock(),
+                )
+                raw_request = self.factory.delete(
+                    f'/api/admin/dashboard/listings/{listing_type}/12/moderation/',
+                )
+                force_authenticate(raw_request, user=self.admin)
+                view = AdminListingModerationActionView()
+                request = view.initialize_request(raw_request)
+                queryset = Mock()
+                queryset.get.return_value = listing
+
+                with patch.object(
+                    model.objects,
+                    'select_for_update',
+                    return_value=queryset,
+                ), patch(
+                    'books.admin_listing_views.get_object_or_404',
+                    return_value=listing,
+                ), self.assertRaises(ValidationError):
+                    AdminListingModerationActionView.delete.__wrapped__(
+                        view,
+                        request,
+                        listing_type,
+                        12,
+                    )
+
+                listing.save.assert_not_called()

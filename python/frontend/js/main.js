@@ -355,7 +355,6 @@ function renderHomepage() {
                 })
                 : [PassbookCommonComponents.emptyStateElement(
                     "Chưa có sách cho mượn.",
-                    "Quay lại sau để xem các tin mượn mới.",
                 )]
         ));
         bindBorrowButtons(borrowGrid);
@@ -387,7 +386,6 @@ function renderHomepage() {
         } else {
             const empty = PassbookCommonComponents.emptyStateElement(
                 "Chưa có sách mới đăng.",
-                "Khám phá danh mục để tìm cuốn sách phù hợp.",
             );
             const browse = document.createElement("a");
             browse.className = "button button-outline";

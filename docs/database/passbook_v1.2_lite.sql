@@ -1,6 +1,6 @@
 -- Passbook v1.2 lite schema-only DDL.
--- Requires MySQL 8.0.16+ (or compatible MariaDB) for enforced CHECK constraints.
--- Uses utf8mb4_unicode_ci for compatibility with XAMPP MariaDB.
+-- Requires MySQL 8.0.16+ for enforced CHECK constraints and the built-in ngram parser.
+-- MariaDB can use the remaining Lite schema but needs an equivalent non-ngram search setup.
 -- Creates 41 tables: a reduced commerce/social schema plus dedicated book reservations and OTP verification.
 -- No database name, database creation, seed data, migration, or DROP statements.
 -- Application validation must enforce polymorphic target exclusivity and cross-FK consistency.
@@ -19,7 +19,8 @@ CREATE TABLE `universities` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   CONSTRAINT `uq_universities_1` UNIQUE (`code`),
-  KEY `ix_universities_1` (`status`, `name`)
+  KEY `ix_universities_1` (`status`, `name`),
+  FULLTEXT KEY `ft_universities_search` (`name`) WITH PARSER ngram
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `faculties` (
@@ -33,6 +34,7 @@ CREATE TABLE `faculties` (
   CONSTRAINT `uq_faculties_1` UNIQUE (`university_id`, `code`),
   CONSTRAINT `uq_faculties_2` UNIQUE (`id`, `university_id`),
   KEY `ix_faculties_1` (`university_id`, `status`, `name`),
+  FULLTEXT KEY `ft_faculties_search` (`name`) WITH PARSER ngram,
   CONSTRAINT `fk_faculties_1` FOREIGN KEY (`university_id`) REFERENCES `universities` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -47,6 +49,7 @@ CREATE TABLE `majors` (
   CONSTRAINT `uq_majors_1` UNIQUE (`faculty_id`, `code`),
   CONSTRAINT `uq_majors_2` UNIQUE (`id`, `faculty_id`),
   KEY `ix_majors_1` (`faculty_id`, `status`, `name`),
+  FULLTEXT KEY `ft_majors_search` (`name`) WITH PARSER ngram,
   CONSTRAINT `fk_majors_1` FOREIGN KEY (`faculty_id`) REFERENCES `faculties` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -150,6 +153,7 @@ CREATE TABLE `subjects` (
   PRIMARY KEY (`id`),
   CONSTRAINT `uq_subjects_1` UNIQUE (`code`),
   KEY `ix_subjects_1` (`status`, `name`),
+  FULLTEXT KEY `ft_subjects_search` (`name`, `code`) WITH PARSER ngram,
   CONSTRAINT `ck_subjects_1` CHECK (`credits` IS NULL OR `credits` > 0)
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -165,6 +169,7 @@ CREATE TABLE `categories` (
   PRIMARY KEY (`id`),
   CONSTRAINT `uq_categories_1` UNIQUE (`slug`),
   KEY `ix_categories_1` (`parent_id`, `status`, `name`),
+  FULLTEXT KEY `ft_categories_search` (`name`) WITH PARSER ngram,
   CONSTRAINT `fk_categories_1` FOREIGN KEY (`parent_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -195,6 +200,7 @@ CREATE TABLE `book_works` (
   KEY `ix_book_works_1` (`status`, `created_at`, `id`),
   KEY `ix_book_works_2` (`category_id`, `status`, `created_at`),
   KEY `ix_book_works_3` (`created_by`),
+  FULLTEXT KEY `ft_book_works_search` (`title`, `description`, `author_name`) WITH PARSER ngram,
   CONSTRAINT `fk_book_works_1` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_book_works_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -230,6 +236,7 @@ CREATE TABLE `book_editions` (
   PRIMARY KEY (`id`),
   KEY `ix_book_editions_1` (`book_work_id`, `publication_year`),
   KEY `ix_book_editions_2` (`language_id`),
+  FULLTEXT KEY `ft_book_editions_search` (`edition_name`, `publisher_name`, `description`) WITH PARSER ngram,
   CONSTRAINT `ck_book_editions_1` CHECK (`edition_number` IS NULL OR `edition_number` > 0),
   CONSTRAINT `ck_book_editions_2` CHECK (`page_count` IS NULL OR `page_count` > 0),
   CONSTRAINT `fk_book_editions_1` FOREIGN KEY (`book_work_id`) REFERENCES `book_works` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -245,6 +252,7 @@ CREATE TABLE `book_identifiers` (
   PRIMARY KEY (`id`),
   CONSTRAINT `uq_book_identifiers_1` UNIQUE (`identifier_type`, `identifier_value`),
   KEY `ix_book_identifiers_1` (`book_edition_id`),
+  FULLTEXT KEY `ft_book_identifiers_search` (`identifier_value`) WITH PARSER ngram,
   CONSTRAINT `ck_book_identifiers_1` CHECK (CHAR_LENGTH(TRIM(`identifier_type`)) > 0),
   CONSTRAINT `ck_book_identifiers_2` CHECK (CHAR_LENGTH(TRIM(`identifier_value`)) > 0),
   CONSTRAINT `fk_book_identifiers_1` FOREIGN KEY (`book_edition_id`) REFERENCES `book_editions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
@@ -306,6 +314,7 @@ CREATE TABLE `sale_listings` (
   KEY `ix_sale_listings_2` (`status`, `price`, `id`),
   KEY `ix_sale_listings_3` (`status`, `created_at`, `id`),
   KEY `ix_sale_listings_4` (`book_id`),
+  FULLTEXT KEY `ft_sale_listings_search` (`title`, `description`) WITH PARSER ngram,
   CONSTRAINT `ck_sale_listings_1` CHECK (`price` > 0),
   CONSTRAINT `ck_sale_listings_2` CHECK (`currency` = 'VND'),
   CONSTRAINT `ck_sale_listings_3` CHECK (`status` IN ('DRAFT','PENDING','ACTIVE','REJECTED','RESERVED','SOLD','CLOSED','EXPIRED')),
@@ -335,6 +344,7 @@ CREATE TABLE `lend_listings` (
   KEY `ix_lend_listings_2` (`status`, `rental_fee`, `id`),
   KEY `ix_lend_listings_3` (`status`, `created_at`, `id`),
   KEY `ix_lend_listings_4` (`book_id`),
+  FULLTEXT KEY `ft_lend_listings_search` (`title`, `description`) WITH PARSER ngram,
   CONSTRAINT `ck_lend_listings_1` CHECK (`rental_fee` >= 0),
   CONSTRAINT `ck_lend_listings_2` CHECK (`deposit_amount` IS NULL OR `deposit_amount` >= 0),
   CONSTRAINT `ck_lend_listings_3` CHECK (`currency` = 'VND'),

@@ -12,21 +12,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from config.cloudinary import verify_cloudinary_image
+from users.models import Faculty, Major, Subject, University
 from .category_taxonomy import BOOK_CATEGORY_SLUGS
 from .models import (
     Book,
+    BookEdition,
     BookIdentifier,
     BookImage,
     BookRequest,
     BorrowTerms,
-    LendListing,
+    BookWork,
     BookWorkSubject,
+    Category,
     Favorite,
     LendListing,
     Review,
     SaleListing,
 )
 from .pagination import BookPagination
+from .search import indexed_icontains
 from .serializers import (
     BookImageSerializer,
     BookListSerializer,
@@ -312,44 +316,64 @@ def _with_search(queryset, search):
     search = (search or '').strip()
     if not search:
         return queryset
-    subject_match = BookWorkSubject.objects.filter(
-        book_work_id=OuterRef('book_edition__book_work_id'),
-    ).filter(
-        Q(subject__name__icontains=search)
-        | Q(subject__code__icontains=search)
-    )
-    sale_listing_match = SaleListing.objects.filter(
-        book_id=OuterRef('pk'),
+    sale_book_ids = indexed_icontains(SaleListing.objects.filter(
         status='ACTIVE',
     ).filter(
         Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()),
-    ).filter(
-        Q(title__icontains=search) | Q(description__icontains=search),
-    )
-    identifier_match = BookIdentifier.objects.filter(
-        book_edition_id=OuterRef('book_edition_id'),
-        identifier_value__icontains=search,
-    )
-    return (
-        queryset
-        .annotate(_subject_match=Exists(subject_match))
-        .annotate(_sale_listing_match=Exists(sale_listing_match))
-        .annotate(_identifier_match=Exists(identifier_match))
-        .filter(
-            Q(_sale_listing_match=True)
-            | Q(book_edition__book_work__title__icontains=search)
-            | Q(book_edition__book_work__description__icontains=search)
-            | Q(book_edition__book_work__author_name__icontains=search)
-            | Q(_subject_match=True)
-            | Q(book_edition__edition_name__icontains=search)
-            | Q(book_edition__publisher_name__icontains=search)
-            | Q(book_edition__description__icontains=search)
-            | Q(book_edition__book_work__category__name__icontains=search)
-            | Q(owner__university__name__icontains=search)
-            | Q(owner__faculty__name__icontains=search)
-            | Q(owner__major__name__icontains=search)
-            | Q(_identifier_match=True)
-        )
+    ), ('title', 'description'), search)
+    work_ids = indexed_icontains(
+        BookWork.objects.all(),
+        ('title', 'description', 'author_name'),
+        search,
+    ).values('id')
+    edition_ids = indexed_icontains(
+        BookEdition.objects.all(),
+        ('edition_name', 'publisher_name', 'description'),
+        search,
+    ).values('id')
+    category_ids = indexed_icontains(
+        Category.objects.all(),
+        ('name',),
+        search,
+    ).values('id')
+    subject_ids = indexed_icontains(
+        Subject.objects.all(),
+        ('name', 'code'),
+        search,
+    ).values('id')
+    subject_work_ids = BookWorkSubject.objects.filter(
+        subject_id__in=Subquery(subject_ids),
+    ).values('book_work_id')
+    university_ids = indexed_icontains(
+        University.objects.all(),
+        ('name',),
+        search,
+    ).values('id')
+    faculty_ids = indexed_icontains(
+        Faculty.objects.all(),
+        ('name',),
+        search,
+    ).values('id')
+    major_ids = indexed_icontains(
+        Major.objects.all(),
+        ('name',),
+        search,
+    ).values('id')
+    identifier_edition_ids = indexed_icontains(
+        BookIdentifier.objects.all(),
+        ('identifier_value',),
+        search,
+    ).values('book_edition_id')
+    return queryset.filter(
+        Q(pk__in=Subquery(sale_book_ids.values('book_id')))
+        | Q(book_edition__book_work_id__in=Subquery(work_ids))
+        | Q(book_edition_id__in=Subquery(edition_ids))
+        | Q(book_edition__book_work__category_id__in=Subquery(category_ids))
+        | Q(book_edition__book_work_id__in=Subquery(subject_work_ids))
+        | Q(owner__university_id__in=Subquery(university_ids))
+        | Q(owner__faculty_id__in=Subquery(faculty_ids))
+        | Q(owner__major_id__in=Subquery(major_ids))
+        | Q(book_edition_id__in=Subquery(identifier_edition_ids))
     )
 
 

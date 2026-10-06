@@ -10,6 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let editing = null;
     let originalImages = [];
     let imagesReady = Promise.resolve();
+    let imageLoadError = null;
+    let staleEditingListing = false;
 
     try {
         editing = JSON.parse(localStorage.getItem("editingListing") || "null");
@@ -151,8 +153,17 @@ document.addEventListener("DOMContentLoaded", () => {
             }));
             renderImages();
         }).catch((error) => {
+            imageLoadError = error;
+            if (error.status === 404) {
+                staleEditingListing = true;
+                setError(
+                    "images",
+                    "Tin cũ không còn tồn tại hoặc không thể chỉnh sửa. Bạn có thể tạo tin mới từ thông tin hiện tại.",
+                );
+                form.querySelector("[data-continue-as-new]").hidden = false;
+                return;
+            }
             setError("images", `Không thể tải ảnh hiện tại: ${error.message}`);
-            throw error;
         });
         const terms = editing.borrow_terms || {};
         Object.entries({
@@ -233,10 +244,13 @@ document.addEventListener("DOMContentLoaded", () => {
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (submitButton.disabled) return;
-        try {
-            await imagesReady;
-        } catch (error) {
-            showToast(`Không thể tải ảnh hiện tại: ${error.message}`);
+        await imagesReady;
+        if (imageLoadError) {
+            showToast(
+                staleEditingListing
+                    ? "Hãy xác nhận tạo tin mới từ thông tin hiện tại trước khi đăng."
+                    : `Không thể tải ảnh hiện tại: ${imageLoadError.message}`,
+            );
             return;
         }
 
@@ -408,5 +422,20 @@ document.addEventListener("DOMContentLoaded", () => {
         success.hidden = true;
         submitButton.disabled = false;
         submitButton.textContent = "Đăng tin";
+    });
+
+    form.querySelector("[data-continue-as-new]")?.addEventListener("click", () => {
+        editing = null;
+        originalImages = [];
+        imageEntries.length = 0;
+        imagesReady = Promise.resolve();
+        imageLoadError = null;
+        staleEditingListing = false;
+        localStorage.removeItem("editingListing");
+        setError("images");
+        renderImages();
+        submitButton.textContent = "Đăng tin";
+        form.querySelector("[data-continue-as-new]").hidden = true;
+        showToast("Đã chuyển sang đăng tin mới. Thông tin bạn nhập được giữ nguyên.");
     });
 });

@@ -69,7 +69,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             grid.replaceChildren();
             empty.hidden = false;
             empty.querySelector("strong").textContent = "Không thể tải tin đăng";
-            empty.querySelector("p").textContent = requestError.message;
             errorMessage.textContent = requestError.message;
         }
     };

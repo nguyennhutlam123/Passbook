@@ -1320,6 +1320,7 @@
                 ["PENDING", "Chờ duyệt"],
                 ["ACTIVE", "Đã duyệt"],
                 ["REJECTED", "Đã từ chối"],
+                ["CLOSED", "Đã xóa"],
                 ["", "Tất cả"],
             ].forEach(([value, label]) => {
                 const option = element("option", label);
@@ -1460,6 +1461,34 @@
                             });
                             actions.append(approve, reject);
                             card.append(actions);
+                        }
+                        if (!["CLOSED", "RESERVED", "SOLD", "ON_LOAN"].includes(listing.status)) {
+                            const remove = element("button", "Xóa bài đăng", "button button-outline");
+                            remove.type = "button";
+                            remove.addEventListener("click", async () => {
+                                if (!global.confirm(
+                                    `Xóa bài đăng “${listing.title}” khỏi Marketplace? Lịch sử sách và giao dịch sẽ được giữ lại.`,
+                                )) return;
+                                remove.disabled = true;
+                                try {
+                                    await global.AdminAPI.deleteListing(
+                                        listingType,
+                                        listing.id,
+                                    );
+                                    message.textContent = `Đã xóa bài đăng “${listing.title}”.`;
+                                    await load();
+                                } catch (requestError) {
+                                    remove.disabled = false;
+                                    message.textContent = requestError.message || "Không thể xóa bài đăng.";
+                                }
+                            });
+                            card.append(remove);
+                        } else if (["RESERVED", "SOLD", "ON_LOAN"].includes(listing.status)) {
+                            card.append(element(
+                                "p",
+                                "Không thể xóa tin đang có giao dịch hoặc đang được giữ chỗ.",
+                                "caption",
+                            ));
                         }
                         results.append(card);
                     });

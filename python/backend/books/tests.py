@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from config.cloudinary import verify_cloudinary_image
@@ -69,6 +70,7 @@ from .commerce_api_views import (
     CheckoutAddressInputSerializer,
     CheckoutInputSerializer,
     LendListingInputSerializer,
+    LendListingListCreateView,
     checkout_payment_method,
     lend_listing_payload,
 )
@@ -1504,6 +1506,33 @@ class LendListingPayloadTests(SimpleTestCase):
                     lend_listing_payload(listing)['book']['status'],
                     expected_status,
                 )
+
+    def test_public_catalog_newest_sort_prioritizes_approval_time(self):
+        queryset = Mock()
+        for method in ('filter', 'select_related', 'prefetch_related', 'annotate', 'order_by'):
+            getattr(queryset, method).return_value = queryset
+        paginator = Mock()
+        paginator.paginate_queryset.return_value = []
+        paginator.get_paginated_response.return_value = Response({})
+        request = APIRequestFactory().get('/api/lend-listings/', {'sort': 'newest'})
+
+        with patch(
+            'books.commerce_api_views.LendListing.objects.filter',
+            return_value=queryset,
+        ), patch(
+            'books.commerce_api_views.BookPagination',
+            return_value=paginator,
+        ), patch(
+            'books.commerce_api_views.prefetch_book_reviews',
+        ):
+            response = LendListingListCreateView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        queryset.order_by.assert_called_once_with(
+            F('published_at').desc(nulls_last=True),
+            '-id',
+            '-created_at',
+        )
 
 
 class AdminCoverageTests(SimpleTestCase):

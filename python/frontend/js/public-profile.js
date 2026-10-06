@@ -76,7 +76,6 @@ document.addEventListener("DOMContentLoaded", async () => {
                     })
                     : [PassbookCommonComponents.emptyStateElement(
                         "Chưa có tin đăng công khai trong danh mục này.",
-                        "Tin nháp, chờ duyệt, đã từ chối hoặc không còn khả dụng sẽ không hiển thị.",
                     )]
             ));
             bindFavoriteButtons(grid);

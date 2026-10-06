@@ -11,8 +11,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const checkoutSuccess = page.querySelector("[data-checkout-success]");
     const checkoutHeading = page.querySelector("[data-checkout-heading]");
     const checkoutSubmit = page.querySelector("[data-checkout-submit]");
-    const borrowCheckoutNote = page.querySelector("[data-borrow-checkout-note]");
-    const borrowCodNote = page.querySelector("[data-borrow-cod-note]");
     const ordersList = page.querySelector("[data-orders-list]");
     const borrowsList = page.querySelector("[data-borrows-list]");
     let currentUser = PassbookAuth.getCurrentUser() || {};
@@ -125,7 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                     selectedCheckoutIsBorrow = isBorrow;
                     if (isBorrow && paymentMethod) paymentMethod.value = "COD";
-                    updatePaymentInstructions();
+                    updatePaymentMethod();
                     if (checkoutHeading) {
                         checkoutHeading.textContent = isBorrow
                             ? "Tạo phiếu mượn"
@@ -136,7 +134,6 @@ document.addEventListener("DOMContentLoaded", () => {
                             ? "Gửi yêu cầu mượn"
                             : "Đặt hàng";
                     }
-                    if (borrowCheckoutNote) borrowCheckoutNote.hidden = !isBorrow;
                     checkoutForm.hidden = false;
                     checkoutForm.scrollIntoView({behavior: "smooth", block: "center"});
                 } catch (error) {
@@ -158,7 +155,6 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!items.length) {
                 const empty = PassbookCommonComponents.emptyStateElement(
                     "Giỏ hàng đang trống.",
-                    "Khám phá sách để thêm những cuốn bạn cần.",
                 );
                 const browse = document.createElement("a");
                 browse.className = "button button-primary";
@@ -240,21 +236,18 @@ document.addEventListener("DOMContentLoaded", () => {
         checkoutForm.hidden = true;
         if (checkoutHeading) checkoutHeading.textContent = "Thông tin đặt hàng";
         if (checkoutSubmit) checkoutSubmit.textContent = "Đặt hàng";
-        if (borrowCheckoutNote) borrowCheckoutNote.hidden = true;
         if (selectedCheckoutIsBorrow && paymentMethod) {
             paymentMethod.value = previousPaymentMethod || "COD";
         }
         selectedCheckoutIsBorrow = false;
-        updatePaymentInstructions();
+        updatePaymentMethod();
         cartError.textContent = "";
     });
 
     const paymentMethod = checkoutForm?.querySelector("[name='payment_method']");
     const paymentMethodGroup = checkoutForm?.querySelector("[data-checkout-payment-method]");
     const fakeOptions = checkoutForm?.querySelector("[data-fake-payment-options]");
-    const bankTransferNote = checkoutForm?.querySelector("[data-bank-transfer-note]");
-    const codNote = checkoutForm?.querySelector("[data-cod-note]");
-    const updatePaymentInstructions = () => {
+    const updatePaymentMethod = () => {
         const method = paymentMethod?.value;
         if (paymentMethod) {
             if (selectedCheckoutIsBorrow) paymentMethod.value = "COD";
@@ -267,15 +260,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (paymentMethodGroup) paymentMethodGroup.hidden = false;
         if (fakeOptions) fakeOptions.hidden = selectedCheckoutIsBorrow || method !== "FAKE";
-        if (bankTransferNote) bankTransferNote.hidden = selectedCheckoutIsBorrow || method !== "BANK_TRANSFER";
-        if (codNote) codNote.hidden = selectedCheckoutIsBorrow || method !== "COD";
-        if (borrowCodNote) borrowCodNote.hidden = !selectedCheckoutIsBorrow;
     };
     paymentMethod?.addEventListener("change", () => {
         if (!selectedCheckoutIsBorrow) previousPaymentMethod = paymentMethod.value;
-        updatePaymentInstructions();
+        updatePaymentMethod();
     });
-    updatePaymentInstructions();
+    updatePaymentMethod();
 
     checkoutForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
